@@ -30,9 +30,14 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   register → human approve → chunk → PII-redact → embed → search. Flow doc:
   [docs/knowledge-flow.md](docs/knowledge-flow.md).
 - ✅ docker-compose + Makefile + pyproject (installable) + docs (design, running, knowledge-flow).
+- ✅ **Agent + workbench done** (see [docs/agent-flow.md](docs/agent-flow.md)):
+  `core/decompose.py` (exact LMDI ΔVRR attribution) · `core/faithfulness.py` (gate) ·
+  `agent/tools.py` (11 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute) ·
+  `agent/analyst.py` (verify → attribute → classify → propose → draft) · `agent/chat.py`
+  (intent router; **answers fully without an LLM**, Ollama only rephrases behind the gate) ·
+  `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (chart+date filter,
+  lineage+audit, chat, role-gated approval writing `adjustment_history`).
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
-  - `agent/tools.py` — `vrr_decompose` SQL over Postgres (port LMDI from parent repo)
-  - `agent/graph.py` — wire `_gate` (faithfulness) + confirm Ollama tool-calling shape
   - `governance/uc_register.py` — column population from information_schema for lineage
 
 ## How to run
@@ -53,7 +58,10 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
-1. Port `vrr_decompose` SQL into `agent/tools.py`; wire the faithfulness gate in `graph.py`.
-2. Anomaly → `vrr_agent.action_queue` job (core.anomaly + core.recommend over the
-   seeded curated data; safety_limits + precedent are already seeded).
-3. Verify end-to-end: `docker compose up` → seed → app → agent.
+1. Outcome write-back: fill `adjustment_history.actual_post_vrr` after the next build and
+   EMA-update ρ (`core.recommend.update_response_factor`) into `pattern_memory`.
+2. `governance/uc_register.py` — populate columns from information_schema for lineage.
+3. Verify end-to-end on Docker (`docker compose up` → seed → queue → app); so far the
+   full path is verified against a local Postgres 18 cluster, not the compose stack.
+4. Optional: install Ollama (`llama3.1` + `nomic-embed-text`) to enable LLM phrasing +
+   knowledge search; everything else already runs LLM-free.

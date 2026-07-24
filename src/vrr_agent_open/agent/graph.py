@@ -22,6 +22,8 @@ from typing import Annotated, TypedDict
 import mlflow
 
 from ..config import load_config
+from ..core import faithfulness as FA
+from . import chat
 from . import tools as T
 
 CFG = load_config()
@@ -74,14 +76,35 @@ def run(question: str, max_steps: int = 6) -> str:
 
 @mlflow.trace(span_type="CHAIN")
 def _gate(answer: str, decompose: dict | None, messages: list) -> str:
-    """Faithfulness gate: reject narration naming a driver the decomposition doesn't
-    support (port core faithfulness check). Skeleton passes through when no decompose."""
-    if not decompose:
+    """Faithfulness gate (core.faithfulness): narration may only name drivers the
+    decomposition supports, in the direction it computed. A failing answer is
+    REPLACED by the deterministic driver ranking — a wrong explanation is worse than
+    a terse one."""
+    check = FA.check_faithfulness(answer, decompose)
+    if check["ok"]:
         return answer
-    # TODO: port check_faithfulness(answer, decompose) from the Databricks agent.py
-    return answer
+    lines = ["⚠️ The narration was rejected by the faithfulness gate "
+             f"({'; '.join(v['detail'] for v in check['violations'])})",
+             "", "Computed attribution:"]
+    for d in decompose["drivers"]:
+        lines.append(f"- {d['label']}: {d['contribution']:+.4f} VRR "
+                     f"({d['share']*100:.1f}% of the move)")
+    return "\n".join(lines)
+
+
+def ask(question: str, pattern: str | None = None, date: str | None = None) -> dict:
+    """Entry point used by the Streamlit chat: deterministic tools first, LLM optional.
+
+    ``run()`` above is the LLM-driven tool loop (needs Ollama with tool-calling). This
+    is the loop the app uses because it degrades to a fully deterministic answer when
+    no local model is installed. Same tools, same gate.
+    """
+    return chat.respond(question, pattern=pattern, date=date)
 
 
 if __name__ == "__main__":
     q = " ".join(sys.argv[1:]) or "List the patterns and their latest VRR."
-    print(run(q))
+    if chat.llm_available():
+        print(run(q))
+    else:                       # no Ollama → deterministic path, still fully answerable
+        print(ask(q)["text"])
