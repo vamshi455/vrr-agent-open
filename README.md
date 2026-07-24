@@ -46,6 +46,8 @@ make app                  # 5. Streamlit report + approval queue
 make agent                # or ask one question from the CLI
 ```
 
+> Full step-by-step, commented: [docs/running.md](docs/running.md).
+
 ## Repository layout
 
 ```
