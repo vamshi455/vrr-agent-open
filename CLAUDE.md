@@ -18,7 +18,13 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 
 ## Current status (2026-07-24)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval. **38 tests pass** (`pytest -q`, no stack needed).
+  anomaly, knowledge, approval. **45 tests pass** (`pytest -q`, no stack needed).
+- ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
+  `vrr_agent` memory/limits/precedent) and `pipeline/build.py` (`vrr_raw` →
+  `vrr_curated` via `core.physics`; `make build` rebuilds curated alone). Verified
+  end-to-end against a real Postgres: 4,745 contrib rows → 36 monthly rows, and
+  `core.anomaly` fires all three rules — UNITY out_of_band+drift, HORIZON clean,
+  MERIDIAN extrapolated_pvt (non-actionable).
 - ✅ Postgres three-schema DDL (`pipeline/schema.sql`, + pgvector).
 - ✅ PDF → pgvector ingest path complete (`pipeline/knowledge_ingest.py`):
   register → human approve → chunk → PII-redact → embed → search. Flow doc:
@@ -27,8 +33,6 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `agent/tools.py` — `vrr_decompose` SQL over Postgres (port LMDI from parent repo)
   - `agent/graph.py` — wire `_gate` (faithfulness) + confirm Ollama tool-calling shape
-  - `pipeline/seed.py` — **does not exist yet**; `make seed` will fail until written
-    (needs: synthetic raw → core.physics → curated → Postgres). This is the next task.
   - `governance/uc_register.py` — column population from information_schema for lineage
 
 ## How to run
@@ -49,7 +53,7 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
-1. Write `pipeline/seed.py` so `make seed` works (synthetic → core.physics → Postgres).
-2. Port `vrr_decompose` SQL into `agent/tools.py`; wire the faithfulness gate in `graph.py`.
-3. Add the Postgres `vrr_build` runner (raw → completion_contrib → pattern_vrr_monthly).
-4. Verify end-to-end: `docker compose up` → seed → app → agent.
+1. Port `vrr_decompose` SQL into `agent/tools.py`; wire the faithfulness gate in `graph.py`.
+2. Anomaly → `vrr_agent.action_queue` job (core.anomaly + core.recommend over the
+   seeded curated data; safety_limits + precedent are already seeded).
+3. Verify end-to-end: `docker compose up` → seed → app → agent.

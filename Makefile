@@ -1,4 +1,4 @@
-.PHONY: up down install test seed register app agent lint
+.PHONY: up down install test seed build register app agent lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
 	docker compose up -d
@@ -14,6 +14,9 @@ test:          ## run the pure off-DB unit tests (no stack needed)
 
 seed:          ## generate + load synthetic VRR data into Postgres
 	python -m vrr_agent_open.pipeline.seed
+
+build:         ## rebuild vrr_curated from vrr_raw only (core.physics; no reseed)
+	python -m vrr_agent_open.pipeline.build
 
 register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
 	python -m vrr_agent_open.governance.uc_register

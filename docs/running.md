@@ -33,7 +33,15 @@ docker compose ps                 # confirm all three are "running"/healthy
 
 # Load synthetic VRR data: generates raw data and computes the curated tables
 # (completion_contrib → pattern_vrr_monthly) with core/physics. Postgres now has VRR.
+# Idempotent (truncates + reloads) and deterministic (fixed RNG seed). Seeds 3 patterns:
+#   UNITY    over-injecting — VRR drifts 1.00 → 1.33 by Apr-2026 (out_of_band + drift)
+#   HORIZON  healthy — stays inside the [0.90, 1.10] band (the negative control)
+#   MERIDIAN pressure falls below its PVT range from Jan-2026 → any_extrapolated
 make seed
+
+# Rebuild ONLY vrr_curated from whatever is in vrr_raw (same core/physics path, new
+# run_id). Use after editing raw data or the builder; no reseed, no agent-table writes.
+make build
 
 # Register the vrr_* schemas/tables in Unity Catalog OSS as the catalog-of-record
 # (governance metadata + RBAC + lineage). Postgres stays the engine.
