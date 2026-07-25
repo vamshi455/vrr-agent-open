@@ -39,6 +39,40 @@ Step 1 gates step 4: if the PVT lookups were extrapolated, the draft becomes
 *investigate inputs* and no valve change is proposed (design §6 — never act on suspect
 inputs).
 
+## Connecting the local LLM
+
+```bash
+brew install ollama                # or https://ollama.com/download
+ollama serve &                     # http://localhost:11434
+ollama pull qwen2.5:7b             # narrator + tool-caller (reliable tool schema)
+ollama pull nomic-embed-text       # 768-dim embeddings for knowledge search
+```
+
+The app auto-detects it (sidebar flips to 🟢 with the model name). `VRR_LLM_MODEL`
+overrides the choice; `agent.llm.pick_model()` falls back to whatever chat model is
+actually pulled, so any local model works. `VRR_LLM_BASE_URL` points at any other
+OpenAI-compatible endpoint.
+
+Two modes, toggled in the chat tab:
+
+| Mode | Who calls the tools | Speed (local 7B) | Use when |
+|---|---|---|---|
+| **default** | the deterministic pipeline (`analyst.analyze`) runs verify → attribute → classify → propose; the model only rewrites the result | ~8 s | normal analysis |
+| **agentic** | the model itself picks tools/tables in a loop (`graph.run`) | ~1–2 min | open-ended questions that cross tools |
+
+Both are gated identically. In practice the agentic loop on a 7B model gets caught
+fabricating figures more often (it likes to compute daily averages) — when that happens
+the computed answer is shown with the violation displayed, which is the designed
+outcome, not a failure.
+
+## General VRR questions
+
+Conceptual questions ("what is VRR", "what happens if you over-inject") are routed to a
+`general` intent: the model answers from its own knowledge, grounded in the project's
+VRR primer (`graph.DOMAIN`) plus any ingested documents (pgvector), and the answer is
+labelled *general knowledge — not computed from your Postgres tables*. Nothing about
+this field's numbers may come from that path.
+
 ## The chat is answerable without an LLM
 
 `agent/chat.py` routes a question to an intent (`explain` · `audit` · `lineage` ·

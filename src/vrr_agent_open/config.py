@@ -33,7 +33,10 @@ class Config:
     mlflow_uri: str = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
     # --- LLM narrator (pluggable; Ollama by default, fully local) ---
     llm_provider: str = os.environ.get("VRR_LLM_PROVIDER", "ollama")
-    llm_model: str = os.environ.get("VRR_LLM_MODEL", "llama3.1")
+    # qwen2.5:7b is the default because it follows Ollama's tool-calling schema
+    # reliably; llama3.1 also works. agent.llm.pick_model() falls back to whatever
+    # chat model is actually pulled, so a different local model still works.
+    llm_model: str = os.environ.get("VRR_LLM_MODEL", "qwen2.5:7b")
     llm_base_url: str = os.environ.get("VRR_LLM_BASE_URL", "http://localhost:11434")
 
     default_target_vrr: float = DEFAULT_TARGET_VRR

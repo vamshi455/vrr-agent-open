@@ -24,6 +24,7 @@ import httpx
 from ..config import load_config
 from ..core import faithfulness as FA
 from . import analyst as AZ
+from . import llm
 from . import tools as T
 
 CFG = load_config()
@@ -48,12 +49,32 @@ INTENTS = (
 )
 
 
+# Conceptual questions ("what is VRR?", "why does over-injection matter?") that are
+# about the DOMAIN rather than this field's numbers. Answered from the model's own
+# knowledge (+ ingested documents when available), clearly labelled as such.
+GENERAL_MARKERS = (
+    "what is", "what's", "what does", "how does", "why does", "why do", "explain",
+    "difference between", "should i", "should we", "best practice", "typical",
+    "rule of thumb", "in general", "generally", "mean by", "definition", "concept",
+    "what happens if", "how do you interpret", "good vrr", "ideal vrr",
+)
+DATA_MARKERS = ("this pattern", "our", "here", "shown", "screen", "table", "period")
+
+
 def detect_intent(question: str) -> str:
     q = question.lower()
     for name, keys in INTENTS:
         if any(k in q for k in keys):
             return name
     return "explain"
+
+
+def is_general(question: str, pattern_named: bool, date_named: bool) -> bool:
+    """A conceptual question is 'general' only when it isn't pinned to our data."""
+    q = question.lower()
+    if pattern_named or date_named or any(m in q for m in DATA_MARKERS):
+        return False
+    return any(m in q for m in GENERAL_MARKERS)
 
 
 def resolve_pattern(question: str, default: str | None = None) -> str | None:
@@ -79,32 +100,36 @@ def resolve_date(question: str, default: str | None = None) -> str | None:
 # ---- optional local LLM -----------------------------------------------------
 
 def llm_available(timeout: float = 1.5) -> bool:
-    try:
-        r = httpx.get(f"{CFG.llm_base_url}/api/tags", timeout=timeout)
-        return r.status_code == 200
-    except Exception:
-        return False
+    return llm.available(timeout)
 
 
 NARRATOR_SYSTEM = (
     "You are a reservoir-engineering analyst assistant. You are given a COMPUTED "
-    "analysis. Rewrite it as a clear answer to the analyst's question. Rules you must "
-    "not break: never invent, round, or recompute a number — copy figures exactly as "
-    "given; never name a driver that is not in the decomposition; never recommend an "
-    "action beyond the one computed. Keep it under 200 words."
+    "analysis. Rewrite it as a clear answer to the analyst's question.\n"
+    "Rules you must not break:\n"
+    "- Never invent, round, or recompute a number — copy figures exactly as given.\n"
+    "- Never name a driver that is not in the decomposition, and never recommend an "
+    "action beyond the one computed.\n"
+    "- Watch the SIGNS. Each driver line reads '<term>: <change in res bbl> → "
+    "<effect on VRR>'. A NEGATIVE res bbl change means that term FELL. A production "
+    "term that falls RAISES VRR (less voidage to replace); a production term that rises "
+    "lowers VRR. Never write that a term increased when its res bbl change is negative.\n"
+    "Keep it under 200 words."
 )
 
 
-def _llm_rephrase(question: str, case: dict) -> str | None:
-    try:
-        r = httpx.post(f"{CFG.llm_base_url}/api/chat", json={
-            "model": CFG.llm_model, "stream": False,
-            "messages": [
-                {"role": "system", "content": NARRATOR_SYSTEM},
+def _llm_rephrase(question: str, case: dict, feedback: str | None = None) -> str | None:
+    """Ask the local model to phrase the computed case. ``feedback`` re-runs it with the
+    gate's complaint attached — one repair attempt before we give up on the prose."""
+    messages = [{"role": "system", "content": NARRATOR_SYSTEM},
                 {"role": "user", "content": f"Analyst question: {question}\n\n"
-                                            f"COMPUTED ANALYSIS:\n{case['narrative']}"}],
-        }, timeout=120)
-        return (r.json().get("message") or {}).get("content")
+                                            f"COMPUTED ANALYSIS:\n{case['narrative']}"}]
+    if feedback:
+        messages.append({"role": "user", "content":
+                         f"Your previous answer was rejected: {feedback} "
+                         "Rewrite it, fixing that and changing nothing else."})
+    try:
+        return (llm.chat(messages) or {}).get("content")
     except Exception:
         return None
 
@@ -113,28 +138,102 @@ def _gated_answer(question: str, case: dict) -> tuple[str, dict]:
     """LLM phrasing if it survives the faithfulness gate; otherwise the computed text."""
     if not llm_available():
         return case["narrative"], {"llm": False, "gate": "skipped (no local LLM running)"}
+    def _check(text: str) -> tuple[bool, dict, dict]:
+        faith = FA.check_faithfulness(text, case.get("decompose"))
+        nums = FA.check_numbers(text, case.get("facts") or [])
+        return faith["ok"] and nums["ok"], faith, nums
+
     draft = _llm_rephrase(question, case)
     if not draft:
         return case["narrative"], {"llm": False, "gate": "skipped (LLM call failed)"}
-    faith = FA.check_faithfulness(draft, case.get("decompose"))
-    nums = FA.check_numbers(draft, case.get("facts") or [])
-    if faith["ok"] and nums["ok"]:
-        return draft, {"llm": True, "gate": "passed", "checks": {"drivers": faith,
-                                                                 "numbers": nums}}
+    ok, faith, nums = _check(draft)
+    if ok:
+        return draft, {"llm": True, "gate": "passed"}
+
+    complaint = " ".join([v["detail"] for v in faith["violations"]]
+                         + ([f"These numbers came from nowhere: {nums['uncited']}."]
+                            if nums["uncited"] else []))
+    repaired = _llm_rephrase(question, case, feedback=complaint)
+    if repaired:
+        ok2, faith2, nums2 = _check(repaired)
+        if ok2:
+            return repaired, {"llm": True, "gate": "passed after one repair",
+                              "first_attempt_violations": faith["violations"]}
+        faith, nums = faith2, nums2
     return (case["narrative"],
             {"llm": True, "gate": "REJECTED — showing the computed answer instead",
-             "violations": faith["violations"],
-             "uncited_numbers": nums["uncited"]})
+             "violations": faith["violations"], "uncited_numbers": nums["uncited"]})
 
 
 # ---- the router -------------------------------------------------------------
 
+GENERAL_SYSTEM = (
+    "You are a reservoir engineer explaining VRR (voidage replacement ratio) concepts to "
+    "a colleague. Answer the question directly and concisely (under 200 words). Use the "
+    "definitions in the primer below as authoritative — do not contradict them. You are "
+    "answering from general reservoir-engineering knowledge, NOT from this site's data — "
+    "if the question would need field data to answer properly, say so and name the tool "
+    "or table that would provide it (vrr_curated.pattern_vrr_monthly for VRR history, "
+    "vrr_curated.completion_contrib for the per-completion lineage). Never invent "
+    "numbers about this field."
+)
+
+
+def general_answer(question: str, use_llm: bool = True) -> dict:
+    """Domain Q&A that isn't about our tables: model knowledge + any ingested documents.
+
+    Grounded in the knowledge index when documents have been ingested (pgvector), and
+    always labelled so an analyst can tell general theory from computed field results.
+    """
+    hits = T.search_knowledge(question, 3)
+    context = ""
+    if hits.get("ok") and hits.get("hits"):
+        context = "\n\nExcerpts from the ingested reservoir documents:\n" + "\n".join(
+            f"[{h['file_name']} p.{h['page']}] {h['text'][:600]}" for h in hits["hits"])
+
+    if not (use_llm and llm.available()):
+        return {"intent": "general", "data": hits, "meta": {"llm": False},
+                "text": ("No local LLM is running, so I can only answer questions that "
+                         "map onto the deterministic tools (VRR for a pattern/period, "
+                         "why it moved, lineage, audit, recommendation).\n\n"
+                         "Start one with `ollama serve` and pull a model "
+                         "(`ollama pull qwen2.5:7b`) to ask open-ended VRR questions."
+                         + (context if context else ""))}
+
+    # Ground the model in the project's own VRR primer so a small local model can't
+    # drift on the basics (e.g. inverting the ratio).
+    from .graph import DOMAIN
+    msg = llm.chat([{"role": "system", "content": GENERAL_SYSTEM + "\n\nPRIMER\n" + DOMAIN},
+                    {"role": "user", "content": question + context}])
+    text = (msg.get("content") or "").strip()
+    label = ("_General reservoir-engineering knowledge"
+             + (" grounded in ingested documents" if context else "")
+             + " — not computed from your Postgres tables._")
+    return {"intent": "general", "text": f"{text}\n\n{label}",
+            "data": {"knowledge_hits": hits.get("hits", [])},
+            "meta": {"llm": True, "gate": "n/a (no field figures claimed)",
+                     "grounded": bool(context)}}
+
+
 def respond(question: str, *, pattern: str | None = None, date: str | None = None,
-            use_llm: bool = True) -> dict:
-    """Answer one analyst question. Returns text + the raw tool payloads behind it."""
+            use_llm: bool = True, agentic: bool = False) -> dict:
+    """Answer one analyst question. Returns text + the raw tool payloads behind it.
+
+    ``agentic=False`` (default): the deterministic pipeline runs the tools in the right
+    order and the LLM only rewrites the resulting case file — fast (~10 s) and it passes
+    the gate most of the time. ``agentic=True``: the LLM drives the tool loop itself
+    (`graph.run`), choosing which tables to query — slower (~1–2 min on a local 7B) and
+    more likely to be caught fabricating, in which case the computed answer is shown.
+    """
     intent = detect_intent(question)
-    pid = resolve_pattern(question, pattern)
-    when = resolve_date(question, date)
+    named_pattern = resolve_pattern(question, None)
+    named_date = resolve_date(question, None)
+    pid = named_pattern or pattern
+    when = named_date or date
+
+    if intent in ("explain", "recommend") and is_general(question, bool(named_pattern),
+                                                         bool(named_date)):
+        return general_answer(question, use_llm)
 
     if intent == "list" or not pid:
         rows = T.list_patterns()
@@ -221,6 +320,41 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
                          f"**{res['next_approver']}** → RM → site. "
                          "Open the Approval queue tab to action it.")}
 
-    text, meta = (_gated_answer(question, case) if use_llm
-                  else (case["narrative"], {"llm": False, "gate": "disabled"}))
-    return {"intent": intent, "text": text, "data": case, "meta": meta}
+    if not (use_llm and llm.available()):
+        return {"intent": intent, "text": case["narrative"], "data": case,
+                "meta": {"llm": False, "gate": "skipped (no local LLM running)"}}
+
+    if not agentic:
+        # Default: deterministic pipeline computed the case; the LLM only rewrites it.
+        text, meta = _gated_answer(question, case)
+        meta.setdefault("model", llm.pick_model())
+        return {"intent": intent, "text": text, "data": case, "meta": meta}
+
+    # Agentic: let the model drive the tool loop itself (it decides which tables to
+    # query), gated. If the loop fails or the gate rejects, the computed case stands.
+    from . import graph                       # local import: graph imports chat lazily
+    try:
+        out = graph.run(question, pattern=case["pattern_id"], date=case["vrr_date"])
+    except Exception as e:
+        text, meta = _gated_answer(question, case)       # fall back to rephrase-only
+        meta["note"] = f"tool loop unavailable ({e})"
+        return {"intent": intent, "text": text, "data": case, "meta": meta}
+
+    gate = out.get("gate") or {}
+    if not out.get("text") or not gate.get("ok"):
+        # The model's narration failed verification — show the computed case file
+        # instead. Being terse and right beats being fluent and wrong.
+        return {"intent": intent, "text": case["narrative"],
+                "data": {"case": case, "tool_trace": out.get("trace")},
+                "meta": {"llm": True, "model": llm.pick_model(),
+                         "gate": "REJECTED — showing the computed answer",
+                         "violations": gate.get("violations"),
+                         "uncited_numbers": gate.get("uncited_numbers"),
+                         "tools_called": [t["tool"] for t in out.get("trace") or []]}}
+    return {"intent": intent, "text": out["text"],
+            "data": {"case": case, "tool_trace": out["trace"]},
+            "meta": {"llm": True, "model": llm.pick_model(),
+                     "gate": "passed" if gate.get("ok") else "repaired/replaced",
+                     "tools_called": [t["tool"] for t in out["trace"]],
+                     "violations": gate.get("violations"),
+                     "uncited_numbers": gate.get("uncited_numbers")}}

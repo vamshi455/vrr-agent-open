@@ -13,12 +13,13 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - **Unity Catalog OSS** — governance catalog-of-record (RBAC + lineage; NOT a query engine)
 - **MLflow OSS** — tracing / eval / registry
 - **Streamlit** — report + approval UI
-- **Ollama** — local LLM narrator + `nomic-embed-text` embeddings (pluggable)
+- **Ollama** — local LLM narrator/tool-caller (`qwen2.5:7b`) + `nomic-embed-text`
+  embeddings (pluggable; everything still runs LLM-free)
 - **docker-compose** — postgres+pgvector · unitycatalog · mlflow
 
 ## Current status (2026-07-24)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval. **45 tests pass** (`pytest -q`, no stack needed).
+  anomaly, knowledge, approval, decompose, faithfulness. **59 tests pass** (`pytest -q`, no stack needed).
 - ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
   `vrr_agent` memory/limits/precedent) and `pipeline/build.py` (`vrr_raw` →
   `vrr_curated` via `core.physics`; `make build` rebuilds curated alone). Verified
@@ -34,7 +35,8 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   `core/decompose.py` (exact LMDI ΔVRR attribution) · `core/faithfulness.py` (gate) ·
   `agent/tools.py` (11 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute) ·
   `agent/analyst.py` (verify → attribute → classify → propose → draft) · `agent/chat.py`
-  (intent router; **answers fully without an LLM**, Ollama only rephrases behind the gate) ·
+  (intent router: deterministic by default, `agentic=True` lets the model drive the tool
+  loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
   `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (chart+date filter,
   lineage+audit, chat, role-gated approval writing `adjustment_history`).
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
@@ -42,7 +44,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 
 ## How to run
 See [docs/running.md](docs/running.md) (every command commented). Fast path:
-`pip install -e ".[dev]" && pytest -q` (logic only, no Docker).
+`pip install -e ".[dev]" && pytest -q` (logic only, no Docker). LLM chat: see [docs/agent-flow.md](docs/agent-flow.md).
 
 ## Key decision — "Unity Catalog on Postgres" feasibility
 Feasible as a **catalog-of-record**, NOT query enforcement. UC OSS governs registered
@@ -63,5 +65,5 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 2. `governance/uc_register.py` — populate columns from information_schema for lineage.
 3. Verify end-to-end on Docker (`docker compose up` → seed → queue → app); so far the
    full path is verified against a local Postgres 18 cluster, not the compose stack.
-4. Optional: install Ollama (`llama3.1` + `nomic-embed-text`) to enable LLM phrasing +
-   knowledge search; everything else already runs LLM-free.
+4. Ingest a real PDF through `pipeline/knowledge_ingest.py` so the `general` chat
+   intent is grounded in documents (embeddings model is installed).

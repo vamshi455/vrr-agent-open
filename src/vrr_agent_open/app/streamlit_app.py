@@ -29,6 +29,7 @@ from vrr_agent_open.config import load_config
 from vrr_agent_open.core import approval as AP
 from vrr_agent_open.agent import analyst as AZ
 from vrr_agent_open.agent import chat as CH
+from vrr_agent_open.agent import llm as LLM
 from vrr_agent_open.agent import tools as T
 
 CFG = load_config()
@@ -84,9 +85,11 @@ user = st.sidebar.text_input("Your name", value=f"{role}.demo")
 
 st.sidebar.divider()
 llm_up = CH.llm_available()
+model_name = LLM.pick_model() if llm_up else None
 st.sidebar.caption(
-    f"LLM narrator: {'🟢 ' + CFG.llm_model if llm_up else '⚪ not running'}  \n"
-    f"{'Phrasing is LLM-generated and gated.' if llm_up else 'Answers are fully computed — no LLM needed.'}")
+    f"LLM narrator: {'🟢 ' + str(model_name) if llm_up else '⚪ not running'}  \n"
+    + ("Phrasing is LLM-generated and gated; numbers stay tool-computed."
+       if llm_up else "Answers are fully computed — no LLM needed."))
 st.sidebar.caption(f"Postgres: `{CFG.pg_dsn.split('@')[-1]}`")
 
 ctx = T.pattern_context(pid)
@@ -220,6 +223,14 @@ with tab_chat:
     if "chat" not in st.session_state:
         st.session_state.chat = []
 
+    agentic = st.toggle(
+        "Let the model query the tables itself (agentic tool loop — slower)",
+        value=False, disabled=not llm_up,
+        help="Off: the deterministic pipeline runs the tools and the model only rewrites "
+             "the result (~10 s). On: the model chooses which tools/tables to query "
+             "(~1–2 min on a local 7B) — its answer is still gated, and rejected "
+             "narration falls back to the computed one.")
+
     cols = st.columns(4)
     quick = [f"Why is {ctx['pattern_name']}'s VRR {'high' if rows[-1]['vrr'] > target else 'low'} in {period:%B %Y}?",
              f"Is the {period:%B %Y} number actually correct?",
@@ -242,13 +253,17 @@ with tab_chat:
         st.session_state.chat.append({"role": "user", "text": asked})
         with st.chat_message("user"):
             st.markdown(asked)
-        with st.chat_message("assistant"), st.spinner("Running deterministic tools…"):
-            res = CH.respond(asked, pattern=pid, date=str(period))
+        with st.chat_message("assistant"), st.spinner(
+                "Model is querying the tables…" if agentic else "Running deterministic tools…"):
+            res = CH.respond(asked, pattern=pid, date=str(period), agentic=agentic)
             st.markdown(res["text"])
             meta = res.get("meta") or {}
             cap = (f"intent: `{res['intent']}` · "
-                   + ("LLM phrasing, gate " + str(meta.get("gate")) if meta.get("llm")
-                      else f"computed answer ({meta.get('gate', 'no LLM')})"))
+                   + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
+                      if meta.get("llm")
+                      else f"computed answer ({meta.get('gate', 'no LLM')})")
+                   + (f" · tools: {', '.join(meta['tools_called'])}"
+                      if meta.get("tools_called") else ""))
             st.caption(cap)
             if meta.get("violations"):
                 st.warning(f"Faithfulness gate rejected the LLM phrasing: {meta['violations']}")

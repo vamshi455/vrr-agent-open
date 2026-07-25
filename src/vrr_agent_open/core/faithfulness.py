@@ -26,6 +26,11 @@ TERM_PHRASES: dict[str, tuple[str, ...]] = {
 }
 
 NEGLIGIBLE_SHARE = 0.10       # a term below this share of |ΔVRR| may not be "the driver"
+# Phrases that turn a mention into a CAUSAL CLAIM. Listing a small term with its true
+# share is fine ("gas injection contributed 0.0%"); calling it the cause is not.
+DRIVER_CLAIMS = ("driven by", "drove", "due to", "because of", "caused by", "cause of",
+                 "main", "primary", "dominant", "key driver", "responsible for",
+                 "attributable to", "explained by", "the driver", "result of")
 UP_WORDS = ("increase", "increased", "higher", "rise", "rose", "up", "drove up", "raised")
 DOWN_WORDS = ("decrease", "decreased", "lower", "fell", "drop", "dropped", "down", "reduced")
 
@@ -70,11 +75,14 @@ def check_faithfulness(answer: str, decompose: dict | None,
                                "detail": f"'{TERM_LABELS[term]}' is not a term in the "
                                          "decomposition of this VRR change."})
             continue
-        if d["share"] < negligible_share:
+        claimed_as_cause = any(
+            any(c in clause.lower() for c in DRIVER_CLAIMS)
+            for clause in _clauses_about(answer, term))
+        if d["share"] < negligible_share and claimed_as_cause:
             violations.append({
                 "kind": "unsupported_driver", "term": term,
-                "detail": (f"'{TERM_LABELS[term]}' accounts for only "
-                           f"{d['share']*100:.1f}% of |ΔVRR| — below the "
+                "detail": (f"'{TERM_LABELS[term]}' is presented as a cause but accounts "
+                           f"for only {d['share']*100:.1f}% of |ΔVRR| — below the "
                            f"{negligible_share*100:.0f}% support threshold.")})
             continue
         # Direction: compare against the term's OWN change when the decomposition

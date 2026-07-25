@@ -22,9 +22,17 @@ def test_supported_driver_passes():
     assert r["ok"] and r["supported"] == ["water_inj_res"]
 
 
-def test_negligible_driver_is_rejected():
+def test_negligible_term_claimed_as_the_cause_is_rejected():
     r = check_faithfulness("The rise was driven by oil production.", DEC)
     assert not r["ok"] and r["violations"][0]["kind"] == "unsupported_driver"
+
+
+def test_negligible_term_merely_listed_is_allowed():
+    """Reporting a small term with its true share is honest, not a violation — only
+    presenting it as the cause is."""
+    r = check_faithfulness(
+        "Water injection increased. Oil production contributed 0.2% of the move.", DEC)
+    assert r["ok"], r["violations"]
 
 
 def test_wrong_direction_is_rejected():
