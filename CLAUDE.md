@@ -57,6 +57,7 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - `core/` stays pure (no I/O) so it unit-tests off-DB. Nothing imports `pipeline`.
 - Git: commit + push directly to `main`, no feature branches; **after pushing, always
   reply with the GitHub link** (repo: https://github.com/vamshi455/vrr-agent-open).
+  Commit under Vamshi's name only — **no `Co-Authored-By: Claude` trailer**.
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
