@@ -11,6 +11,7 @@ The toolbelt, in the order an analyst usually needs it:
   VRR_TREND          the series behind the chart (date-filtered)
   VRR_GET            one period + provenance
   VRR_DECOMPOSE      ΔVRR attribution a→b (core.decompose, exact + additive)
+  LIST_COMPLETIONS   the completions in a pattern, role + share of production/injection
   VRR_LINEAGE        how THIS number was built: monthly ← completions ← raw + PVT
   VRR_AUDIT          recompute from raw with core.physics and diff vs the stored value
   PATTERN_CONTEXT    target, learned band/ρ, safety limits, prior adjustments
@@ -248,6 +249,56 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     }
 
 
+@tracing.trace("LIST_COMPLETIONS", span_type="TOOL")
+def list_completions(pattern: str, date: str | None = None) -> dict:
+    """The completions making up a pattern, with each one's role and share of the VRR.
+
+    Producer vs injector is derived from what the completion actually contributed in the
+    period (not a static well list), so a converted well shows up under the role it
+    played that month. Shares are of the pattern's production / injection totals.
+    """
+    p = _resolve(pattern)
+    if not p:
+        return {"found": False, "pattern": pattern}
+    pid = p["pattern_id"]
+    if not date:
+        rows = vrr_trend(pid)["rows"]
+        if not rows:
+            return {"found": False, "pattern_id": pid, "reason": "no VRR history"}
+        date = str(rows[-1]["vrr_date"])
+
+    completions = _rows(
+        "SELECT completion_id, count(*) n_days, avg(factor) factor,"
+        " string_agg(DISTINCT pvt_method, ',') pvt_methods,"
+        " min(pressure_psi) min_pressure, max(pressure_psi) max_pressure,"
+        " sum(oil) oil, sum(water) water, sum(gas) gas, sum(water_inj) water_inj,"
+        " sum(gas_inj) gas_inj, sum(oil_res) oil_res, sum(water_res) water_res,"
+        " sum(coalesce(free_gas_res,0)) free_gas_res, sum(water_inj_res) water_inj_res,"
+        " sum(gas_inj_res) gas_inj_res FROM vrr_curated.completion_contrib"
+        " WHERE pattern_id=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date"
+        " GROUP BY completion_id ORDER BY completion_id", {"p": pid, "d": date})
+
+    prod_total = sum(c["oil_res"] + c["water_res"] + c["free_gas_res"] for c in completions)
+    inj_total = sum(c["water_inj_res"] + c["gas_inj_res"] for c in completions)
+    for c in completions:
+        c["prod_res"] = c["oil_res"] + c["water_res"] + c["free_gas_res"]
+        c["inj_res"] = c["water_inj_res"] + c["gas_inj_res"]
+        c["role"] = ("injector" if c["inj_res"] > c["prod_res"] else
+                     "producer" if c["prod_res"] > 0 else "idle")
+        c["share_of_production"] = c["prod_res"] / prod_total if prod_total else 0.0
+        c["share_of_injection"] = c["inj_res"] / inj_total if inj_total else 0.0
+    return {
+        "found": bool(completions), "pattern_id": pid, "pattern_name": p["pattern_name"],
+        "vrr_date": date, "n_completions": len(completions),
+        "n_producers": sum(1 for c in completions if c["role"] == "producer"),
+        "n_injectors": sum(1 for c in completions if c["role"] == "injector"),
+        "prod_res_bbl": prod_total, "inj_res_bbl": inj_total,
+        "vrr": physics.vrr(inj_total, prod_total), "completions": completions,
+        "provenance": {"table": "vrr_curated.completion_contrib",
+                       "keys": {"pattern_id": pid, "month": date}},
+    }
+
+
 @tracing.trace("PATTERN_CONTEXT", span_type="TOOL")
 def pattern_context(pattern: str) -> dict:
     """Target, learned band/ρ, safety limits and prior adjustments for one pattern."""
@@ -409,6 +460,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
           {**_PATTERN, **_DATE}, ["pattern", "date"]),
     _spec("VRR_AUDIT", "Recompute a month's VRR from raw tables and diff vs the stored value.",
           {**_PATTERN, **_DATE}, ["pattern", "date"]),
+    _spec("LIST_COMPLETIONS", "List the completions in a pattern with role and share of VRR.",
+          {**_PATTERN, **_DATE}, ["pattern"]),
     _spec("PATTERN_CONTEXT", "Target, learned band/rho, safety limits, adjustment history.",
           _PATTERN, ["pattern"]),
     _spec("DETECT_ANOMALIES", "Run the deterministic anomaly rules over a pattern.",
@@ -428,6 +481,7 @@ DISPATCH = {
     "VRR_DECOMPOSE": lambda a: vrr_decompose(a["pattern"], a["date_a"], a["date_b"]),
     "VRR_LINEAGE": lambda a: vrr_lineage(a["pattern"], a["date"]),
     "VRR_AUDIT": lambda a: vrr_audit(a["pattern"], a["date"]),
+    "LIST_COMPLETIONS": lambda a: list_completions(a["pattern"], a.get("date")),
     "PATTERN_CONTEXT": lambda a: pattern_context(a["pattern"]),
     "DETECT_ANOMALIES": lambda a: detect_anomalies(a["pattern"]),
     "RECOMMEND_CHANGE": lambda a: recommend_change(a["pattern"], a.get("date")),

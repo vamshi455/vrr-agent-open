@@ -48,6 +48,8 @@ INTENTS = (
                    "action", "remediate")),
     ("submit", ("submit", "send for approval", "queue it", "raise a draft", "send to rm",
                 "approval")),
+    ("completions", ("completion", "wells", "well list", "which wells", "injectors",
+                     "producers", "injector list")),
     ("list", ("list patterns", "which patterns", "what patterns", "all patterns")),
     ("explain", ("why", "explain", "driver", "cause", "high", "low", "increase", "decrease",
                  "drift", "what happened")),
@@ -291,6 +293,29 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
                          f"{r['n']} periods, latest {r['last_date']}" for r in rows)
         return {"intent": "list", "text": "Patterns in vrr_curated:\n" + text,
                 "data": {"patterns": rows}, "meta": {"llm": False}}
+
+    if intent == "completions":
+        cs = T.list_completions(pid, when)
+        if not cs.get("found"):
+            return {"intent": "completions", "text": "No completion rows for that period.",
+                    "data": cs, "meta": {"llm": False}}
+        L = [f"**{cs['pattern_name']} ({cs['pattern_id']}) — {cs['n_completions']} "
+             f"completions in {cs['vrr_date']}** "
+             f"({cs['n_producers']} producers, {cs['n_injectors']} injectors, "
+             f"VRR {cs['vrr']:.3f})", "",
+             "| completion | role | FACTOR | PVT | prod res bbl | inj res bbl | share |",
+             "|---|---|---|---|---|---|---|"]
+        for c_ in cs["completions"]:
+            share = (c_["share_of_injection"] if c_["role"] == "injector"
+                     else c_["share_of_production"])
+            L.append(f"| {c_['completion_id']} | {c_['role']} | {c_['factor']:.2f} | "
+                     f"{c_['pvt_methods']} | {c_['prod_res']:,.0f} | {c_['inj_res']:,.0f} | "
+                     f"{share*100:.1f}% |")
+        L += ["", f"_Source: `{cs['provenance']['table']}` "
+                  f"(pattern {cs['pattern_id']}, month {cs['vrr_date']}); share is of the "
+                  "pattern's injection total for injectors, production total for producers._"]
+        return {"intent": "completions", "text": "\n".join(L), "data": cs,
+                "meta": {"llm": False}}
 
     if intent == "lineage":
         lin = T.vrr_lineage(pid, when) if when else None

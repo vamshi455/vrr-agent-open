@@ -5,7 +5,7 @@ Open-source, **fully-local** port of the Databricks "VRR Reasoning & Lineage age
 (parent repo: `vamshi455/vrr-agent`, a Databricks/Mosaic AI project). Same trust model
 — the LLM never computes; deterministic tools with provenance; faithfulness gate;
 physics-computed safety-clamped recommendations; human approval; learned ρ feedback —
-rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/design.md).
+rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/design.md); data model: [docs/data-model.md](docs/data-model.md).
 
 ## Stack (all OSS, all local, zero cloud cost)
 - **PostgreSQL + pgvector** — VRR data + compute + the knowledge vector index
@@ -33,7 +33,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - ✅ docker-compose + Makefile + pyproject (installable) + docs (design, running, knowledge-flow).
 - ✅ **Agent + workbench done** (see [docs/agent-flow.md](docs/agent-flow.md)):
   `core/decompose.py` (exact LMDI ΔVRR attribution) · `core/faithfulness.py` (gate) ·
-  `agent/tools.py` (11 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute) ·
+  `agent/tools.py` (12 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute) ·
   `agent/analyst.py` (verify → attribute → classify → propose → draft) · `agent/chat.py`
   (intent router: deterministic by default, `agentic=True` lets the model drive the tool
   loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
