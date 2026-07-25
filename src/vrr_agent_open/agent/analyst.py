@@ -142,7 +142,7 @@ def narrate(case: dict) -> str:
                  + (" ⚠️ Low-confidence PVT — inputs are suspect, so no valve change "
                     "should be made on this period." if a["low_confidence_inputs"] else ""))
         L.append(f"Sources: {', '.join(a['provenance']['recomputed_from'])} → "
-                 f"vrr_curated.completion_contrib → vrr_curated.pattern_vrr_monthly "
+                 f"vrr_curated.completion_contrib → vrr_curated.pattern_vrr "
                  f"(run_id {a['stored'].get('run_id')}).")
 
     d = case.get("decompose") or {}

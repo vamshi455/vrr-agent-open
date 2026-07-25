@@ -34,7 +34,7 @@ def test_build_adjustment_row_pulls_predicted_numbers():
            "d_inj_res_recommended": -420.0,
            "injector_changes": [{"change_pct": -0.10}, {"change_pct": -0.12}]}
     row = AP.build_adjustment_row(q, rec, approver="rm@acme.com")
-    assert row["pattern_id"] == "PUNITY"
+    assert row["id_pattern"] == "PUNITY"   # production key name (ID_PATTERN)
     assert row["change_type"] == "reduce_injection"
     assert row["pre_vrr"] == 1.31 and row["predicted_post_vrr"] == 1.02
     assert row["d_inj_res_bbl"] == -420.0

@@ -31,7 +31,7 @@ def run(pattern: str | None = None, date: str | None = None) -> list[dict]:
         draft = case["draft"]
         # supersede any previous draft for this pattern+period that is still pending
         T._execute(
-            "DELETE FROM vrr_agent.action_queue WHERE pattern_id=%(p)s"
+            "DELETE FROM vrr_agent.action_queue WHERE id_pattern=%(p)s"
             " AND vrr_date=%(d)s AND stage='draft'",
             {"p": case["pattern_id"], "d": case["vrr_date"]})
         res = T.submit_for_approval(case["pattern_id"], case["vrr_date"],

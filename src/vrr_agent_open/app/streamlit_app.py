@@ -181,7 +181,7 @@ with tab_report:
     else:
         st.info("No prior period in range to attribute against.")
 
-    with st.expander("Monthly rows (vrr_curated.pattern_vrr_monthly)"):
+    with st.expander("Monthly rows (vrr_curated.pattern_vrr, grain=monthly)"):
         st.dataframe(df, width="stretch", hide_index=True)
 
 # --------------------------------------------------------------- Lineage ----
@@ -344,11 +344,11 @@ with tab_approve:
                 if nxt == "executed":
                     row = AP.build_adjustment_row(d, rec, approver=user)
                     execute(
-                        "INSERT INTO vrr_agent.adjustment_history (action_id, pattern_id,"
+                        "INSERT INTO vrr_agent.adjustment_history (action_id, id_pattern,"
                         " pattern_name, vrr_date, driver, anomaly, change_type,"
                         " d_inj_res_bbl, d_surface_pct, pre_vrr, predicted_post_vrr,"
                         " actual_post_vrr, decision, approved_by, outcome) VALUES"
-                        " (%(action_id)s,%(pattern_id)s,%(pattern_name)s,%(vrr_date)s,"
+                        " (%(action_id)s,%(id_pattern)s,%(pattern_name)s,%(vrr_date)s,"
                         " %(driver)s,%(anomaly)s,%(change_type)s,%(d_inj_res_bbl)s,"
                         " %(d_surface_pct)s,%(pre_vrr)s,%(predicted_post_vrr)s,"
                         " %(actual_post_vrr)s,%(decision)s,%(approved_by)s,%(outcome)s)", row)

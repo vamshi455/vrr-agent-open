@@ -50,12 +50,16 @@ DOMAIN
   and no valve change may be recommended on that period.
 
 DATA (PostgreSQL)
-- vrr_raw.production_volumes_daily / pattern_pressure / completion_pvt / pattern_target
-  — source-shaped inputs.
+- vrr_raw.production_volumes_daily — allocated daily volumes per COMPLETION (no pattern
+  column: a completion belongs to a pattern only through the contribution factor).
+- vrr_raw.pattern_contribution_factor — completion→pattern FACTOR, time-windowed by
+  effect_date; vrr_raw.pattern_pressure — pattern datum pressure, also time-windowed.
+- vrr_raw.completion_pvt_characteristics — lab PVT per (completion, test_date, pressure).
 - vrr_curated.completion_contrib — the LINEAGE layer: one row per pattern·completion·day
-  holding the raw inputs, the pressure used, the PVT method label, and all five derived
-  reservoir terms.
-- vrr_curated.pattern_vrr_monthly — the monthly aggregate VRR shown in the app.
+  holding the raw inputs, the resolved factor + pressure, the PVT method label and the
+  exact FVFs used, and all five derived reservoir volumes.
+- vrr_curated.pattern_vrr — the DAILY and MONTHLY pattern VRR (grain column), with
+  surface + reservoir totals, vrr_bblbbl, and volume-weighted average FVFs.
 - vrr_agent.pattern_memory (target band, learned response factor rho),
   safety_limits (max % injection change), adjustment_history (past executed changes),
   action_queue (drafts awaiting analyst → RM → site approval).

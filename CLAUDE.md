@@ -5,7 +5,7 @@ Open-source, **fully-local** port of the Databricks "VRR Reasoning & Lineage age
 (parent repo: `vamshi455/vrr-agent`, a Databricks/Mosaic AI project). Same trust model
 — the LLM never computes; deterministic tools with provenance; faithfulness gate;
 physics-computed safety-clamped recommendations; human approval; learned ρ feedback —
-rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/design.md); data model: [docs/data-model.md](docs/data-model.md).
+rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/design.md); data model: [docs/vrr_data_model.md](docs/vrr_data_model.md).
 
 ## Stack (all OSS, all local, zero cloud cost)
 - **PostgreSQL + pgvector** — VRR data + compute + the knowledge vector index
@@ -26,7 +26,12 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   end-to-end against a real Postgres: 4,745 contrib rows → 36 monthly rows, and
   `core.anomaly` fires all three rules — UNITY out_of_band+drift, HORIZON clean,
   MERIDIAN extrapolated_pvt (non-actionable).
-- ✅ Postgres three-schema DDL (`pipeline/schema.sql`, + pgvector).
+- ✅ Postgres three-schema DDL (`pipeline/schema.sql`, + pgvector), **aligned to the
+  production VRR data model** (`CreateVRR/src/vrr_sql_builder.sql`): volumes keyed by
+  completion only, time-windowed `pattern_contribution_factor` + `pattern_pressure`,
+  PVT by (completion, test_date, pressure), derived `Amount_Type`, HAVING gate,
+  daily+monthly `pattern_vrr` with vol-weighted avg FVFs, and cumulative VRR.
+  Reference + local deviations: [docs/vrr_data_model.md](docs/vrr_data_model.md).
 - ✅ PDF → pgvector ingest path complete (`pipeline/knowledge_ingest.py`):
   register → human approve → chunk → PII-redact → embed → search. Flow doc:
   [docs/knowledge-flow.md](docs/knowledge-flow.md).

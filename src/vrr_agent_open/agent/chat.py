@@ -180,7 +180,7 @@ GENERAL_SYSTEM = (
     "definitions in the primer below as authoritative — do not contradict them. You are "
     "answering from general reservoir-engineering knowledge, NOT from this site's data — "
     "if the question would need field data to answer properly, say so and name the tool "
-    "or table that would provide it (vrr_curated.pattern_vrr_monthly for VRR history, "
+    "or table that would provide it (vrr_curated.pattern_vrr for VRR history, "
     "vrr_curated.completion_contrib for the per-completion lineage). Never invent "
     "numbers about this field."
 )

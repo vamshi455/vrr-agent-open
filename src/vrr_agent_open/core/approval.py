@@ -58,7 +58,7 @@ def build_adjustment_row(queue_row: dict, recommendation: dict | None,
     avg_pct = (sum(_num(c.get("change_pct")) for c in changes) / len(changes)) if changes else None
     return {
         "action_id": queue_row.get("action_id"),
-        "pattern_id": queue_row.get("pattern_id"),
+        "id_pattern": queue_row.get("id_pattern") or queue_row.get("pattern_id"),
         "pattern_name": queue_row.get("pattern_name"),
         "vrr_date": queue_row.get("vrr_date"),
         "driver": queue_row.get("driver"),

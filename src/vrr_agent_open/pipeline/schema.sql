@@ -1,69 +1,208 @@
--- vrr_agent_open — PostgreSQL schema (data + compute + pgvector knowledge index).
--- Mirrors the Databricks three-schema layout; registered in Unity Catalog OSS as
--- the governance catalog-of-record (see governance/uc_register.py).
+-- vrr_agent_open — PostgreSQL schema, aligned to the production VRR data model
+-- (CreateVRR/src/vrr_sql_builder.sql). See docs/vrr_data_model.md for the mapping from
+-- the RMDE/TRUSTED_DB source tables to these local ones, column by column.
+--
+-- Structure that matters (and that the first cut of this port got wrong):
+--   * daily volumes are keyed by COMPLETION + DATE only — a completion has no pattern
+--     of its own. Pattern membership comes from PATTERN_CONTRIBUTION_FACTOR, which is
+--     TIME-WINDOWED (effect_date → next effect_date), so one completion can belong to
+--     several patterns with different FACTORs over time.
+--   * pattern pressure is likewise time-windowed (a reading holds until the next one).
+--   * PVT is a set of lab tests per completion (test_date + pressure); the FVFs used on
+--     a given day are interpolated by PRESSURE within the applicable test_date window.
+--   * Amount_Type is DERIVED, not stored: Production when OIL+WATER+GAS > 0.
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE SCHEMA IF NOT EXISTS vrr_raw;
 CREATE SCHEMA IF NOT EXISTS vrr_curated;
 CREATE SCHEMA IF NOT EXISTS vrr_agent;
 
--- ---- raw (source-shaped) --------------------------------------------------
+-- ===========================================================================
+-- raw — source-shaped (local stand-ins for TRUSTED_DB / ENRICHMENT_DB.RMDE_*)
+-- ===========================================================================
+
+-- ← TRUSTED_DB.PRODUCTION_VOLUME.PRODUCTION_VOLUMES_DAILY_OILFIELD
+-- Allocated daily volumes per COMPLETION (no pattern column — see header note).
+-- OilField uom: oil/water in STB, gas in KSCF. The _METRIC variant (SM3) is the same
+-- shape with different units; `uom` records which convention a row is in.
 CREATE TABLE IF NOT EXISTS vrr_raw.production_volumes_daily (
-  pattern_id text, completion_id text, vrr_date date, factor double precision,
-  oil double precision, water double precision, gas double precision,
-  water_inj double precision, gas_inj double precision, amount_type text
+  id_completion text NOT NULL,
+  prod_date date NOT NULL,
+  alloc_oil_vol_stb double precision,
+  alloc_water_vol_stb double precision,
+  alloc_gas_vol_kscf double precision,
+  alloc_water_inj_vol_stb double precision,
+  alloc_gas_inj_vol_kscf double precision,
+  uom text DEFAULT 'OilField',
+  PRIMARY KEY (id_completion, prod_date)
 );
+
+-- ← {source_schema}.PATTERN — the pattern registry.
+CREATE TABLE IF NOT EXISTS vrr_raw.pattern (
+  id_pattern text PRIMARY KEY,
+  pattern_name text
+);
+
+-- ← {source_schema}.PATTERN_CONTRIBUTION_FACTOR — completion→pattern allocation.
+-- effect_date opens a window that closes at the next effect_date for the same
+-- (completion, pattern); end_date is derived with LEAD at build time, not stored.
+CREATE TABLE IF NOT EXISTS vrr_raw.pattern_contribution_factor (
+  id_completion text NOT NULL,
+  id_pattern text NOT NULL,
+  factor double precision,
+  effect_date date NOT NULL,
+  PRIMARY KEY (id_completion, id_pattern, effect_date)
+);
+
+-- ← {source_schema}.PATTERN_PRESSURE — pattern datum pressure, time-windowed.
 CREATE TABLE IF NOT EXISTS vrr_raw.pattern_pressure (
-  pattern_id text, vrr_date date, pressure_psi double precision
+  id_pattern text NOT NULL,
+  pressure_date date NOT NULL,
+  pressure double precision,
+  PRIMARY KEY (id_pattern, pressure_date)
 );
-CREATE TABLE IF NOT EXISTS vrr_raw.completion_pvt (
-  completion_id text, pressure_psi double precision,
-  bo double precision, bw double precision, bg double precision,
-  rs double precision, rv double precision,
-  bw_inj double precision, bg_inj double precision
+
+-- ← {source_schema}.COMPLETION_PVT_CHARACTERISTICS — lab PVT, interpolated by pressure.
+-- Column comments give the production names.
+CREATE TABLE IF NOT EXISTS vrr_raw.completion_pvt_characteristics (
+  id_completion text NOT NULL,
+  test_date date NOT NULL,
+  pressure double precision NOT NULL,        -- PRESSURE
+  bo double precision,                       -- OIL_FORMATION_VOLUME_FACTOR
+  bg double precision,                       -- GAS_FORMATION_VOLUME_FACTOR
+  bw double precision,                       -- WATER_FORMATION_VOLUME_FACTOR
+  bg_inj double precision,                   -- INJECTED_GAS_FORMATION_VOLUME_FACTOR
+  bw_inj double precision,                   -- INJECTED_WATER_FORMATION_VOLUME_FACTOR
+  rs double precision,                       -- SOLUTION_GAS_OIL_RATIO
+  rv double precision,                       -- VOLATIZED_OIL_GAS_RATIO
+  PRIMARY KEY (id_completion, test_date, pressure)
 );
+
+-- Local addition (the production model carries targets elsewhere): per-pattern target.
 CREATE TABLE IF NOT EXISTS vrr_raw.pattern_target (
-  pattern_id text, target_vrr double precision
+  id_pattern text PRIMARY KEY,
+  target_vrr double precision
 );
 
--- ---- curated (lineage layer + VRR aggregates) -----------------------------
--- completion_contrib is the LINEAGE LAYER: one row per (pattern,completion,date)
--- carrying every root input AND every derived reservoir term (from core/physics.py).
+-- ===========================================================================
+-- curated — the lineage layer + the DAILY/MONTHLY pattern VRR outputs
+-- ===========================================================================
+
+-- ≈ the VolumeWithPVT checkpoint, materialised: one row per
+-- (pattern, completion, day) carrying EVERY root input, the resolved factor window,
+-- the pressure in force, the PVT method + the exact FVFs used, and every derived
+-- reservoir volume. This is what makes a VRR number auditable row by row.
 CREATE TABLE IF NOT EXISTS vrr_curated.completion_contrib (
-  pattern_id text, completion_id text, vrr_date date, factor double precision,
-  oil double precision, water double precision, gas double precision,
-  water_inj double precision, gas_inj double precision,
-  pressure_psi double precision, pvt_method text,
-  oil_res double precision, water_res double precision, free_gas_res double precision,
-  water_inj_res double precision, gas_inj_res double precision,
-  run_id text, built_at timestamptz DEFAULT now()
+  id_pattern text NOT NULL,
+  pattern_name text,
+  id_completion text NOT NULL,
+  vrr_date date NOT NULL,
+  amount_type text,                          -- DERIVED: Production | Injection
+  -- resolved allocation + pressure windows
+  factor double precision,
+  factor_effect_date date,
+  pattern_pressure_psia double precision,
+  -- surface volumes (root inputs, copied so the row stands alone)
+  oil_volume_bbl double precision,
+  water_volume_bbl double precision,
+  gas_volume_kscf double precision,
+  water_inj_volume_bbl double precision,
+  gas_inj_volume_kscf double precision,
+  -- PVT actually applied + how it was obtained
+  pvt_method text,                           -- exact|interpolated|extrapolated|closest|none
+  pvt_test_date date,
+  bo double precision, bw double precision, bg double precision,
+  bg_inj double precision, bw_inj double precision,
+  rs double precision, rv double precision,
+  -- derived reservoir volumes (core/physics.py)
+  res_oil_volume_bbl double precision,
+  res_water_volume_bbl double precision,
+  res_free_gas_volume_bbl double precision,  -- NULL for non-producers; may be negative
+  res_water_inj_volume_bbl double precision,
+  res_gas_inj_volume_bbl double precision,
+  run_id text,
+  built_at timestamptz DEFAULT now(),
+  PRIMARY KEY (id_pattern, id_completion, vrr_date)
 );
-CREATE TABLE IF NOT EXISTS vrr_curated.pattern_vrr_monthly (
-  pattern_id text, pattern_name text, vrr_date date,
-  prod_res_bbl double precision, inj_res_bbl double precision, vrr double precision,
-  n_completions int, any_extrapolated boolean, run_id text, built_at timestamptz DEFAULT now()
+CREATE INDEX IF NOT EXISTS completion_contrib_pattern_date_idx
+  ON vrr_curated.completion_contrib (id_pattern, vrr_date);
+
+-- ← DAILY_PATTERN_VRR / MONTHLY_PATTERN_VRR (OilField/BBL variant).
+-- Same column set at both grains, so one table + a `grain` column instead of two.
+CREATE TABLE IF NOT EXISTS vrr_curated.pattern_vrr (
+  id_alias text,                             -- CONCAT(id_pattern, id_fmt)
+  id_pattern text NOT NULL,
+  pattern_name text,
+  vrr_date date NOT NULL,
+  grain text NOT NULL,                       -- 'daily' | 'monthly'
+  pattern_pressure_psia double precision,
+  -- surface totals
+  oil_volume_bbl double precision,
+  water_volume_bbl double precision,
+  water_inj_volume_bbl double precision,
+  gas_volume_kscf double precision,
+  gas_inj_volume_kscf double precision,
+  -- reservoir totals
+  res_oil_volume_bbl double precision,
+  res_water_volume_bbl double precision,
+  res_free_gas_volume_bbl double precision,
+  res_water_inj_volume_bbl double precision,
+  res_gas_inj_volume_bbl double precision,
+  res_production_volume_bbl double precision,
+  res_injection_volume_bbl double precision,
+  vrr_bblbbl double precision,               -- COALESCE(inj/NULLIF(prod,0), 0)
+  -- volume-weighted average PVT actually applied
+  avg_oil_fvf double precision, avg_water_fvf double precision, avg_gas_fvf double precision,
+  avg_inj_water_fvf double precision, avg_inj_gas_fvf double precision,
+  avg_solution_gas_oil_ratio double precision, avg_volatized_oil_gas_ratio double precision,
+  -- local additions used by the agent
+  n_completions int,
+  any_extrapolated boolean,                  -- confidence flag (low-confidence PVT)
+  run_id text,
+  execution_time timestamptz DEFAULT now(),
+  PRIMARY KEY (id_pattern, vrr_date, grain)
 );
 
--- ---- agent (memory + queue + knowledge) -----------------------------------
+-- ← vrr_cumulative_calculator.sql — running totals per pattern by date.
+CREATE TABLE IF NOT EXISTS vrr_curated.pattern_vrr_cumulative (
+  id_pattern text NOT NULL,
+  pattern_name text,
+  vrr_date date NOT NULL,
+  grain text NOT NULL,
+  res_cumulative_oil_production_volume_bbl double precision,
+  res_cumulative_water_production_volume_bbl double precision,
+  res_cumulative_water_injection_volume_bbl double precision,
+  res_cumulative_gas_injection_volume_bbl double precision,
+  res_cumulative_production_volume_bbl double precision,
+  res_cumulative_injection_volume_bbl double precision,
+  cumulative_vrr_bblbbl double precision,
+  run_id text,
+  execution_time timestamptz DEFAULT now(),
+  PRIMARY KEY (id_pattern, vrr_date, grain)
+);
+
+-- ===========================================================================
+-- agent — memory + queue + knowledge (unchanged by the data-model correction)
+-- ===========================================================================
 CREATE TABLE IF NOT EXISTS vrr_agent.pattern_memory (
-  pattern_id text PRIMARY KEY, pattern_name text,
+  id_pattern text PRIMARY KEY, pattern_name text,
   latest_vrr double precision, latest_date date,
   typical_low double precision, typical_high double precision,
   response_factor double precision DEFAULT 1.0, n_adjustments int DEFAULT 0,
   tendencies text, updated_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS vrr_agent.adjustment_history (
-  action_id text, pattern_id text, pattern_name text, vrr_date date, driver text,
+  action_id text, id_pattern text, pattern_name text, vrr_date date, driver text,
   anomaly text, change_type text, d_inj_res_bbl double precision, d_surface_pct double precision,
   pre_vrr double precision, predicted_post_vrr double precision, actual_post_vrr double precision,
   decision text, approved_by text, outcome text, ts timestamptz DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS vrr_agent.safety_limits (
-  pattern_id text, completion_id text, max_inj_rate_change_pct double precision,
+  id_pattern text, id_completion text, max_inj_rate_change_pct double precision,
   max_inj_pressure double precision, fracture_gradient double precision, note text
 );
 CREATE TABLE IF NOT EXISTS vrr_agent.action_queue (
-  action_id text PRIMARY KEY, pattern_id text, pattern_name text, vrr_date date,
+  action_id text PRIMARY KEY, id_pattern text, pattern_name text, vrr_date date,
   anomaly_kind text, severity text, anomaly_detail text, driver text, action_type text,
   recommendation jsonb, precedent jsonb, confidence text, narrative text,
   stage text DEFAULT 'draft', stage_by text, stage_ts timestamptz,

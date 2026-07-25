@@ -57,8 +57,8 @@ def _execute(sql: str, params: dict) -> int:
 
 def _resolve(pattern: str) -> Optional[dict]:
     """Accept either a pattern_id ('PAT-001') or a name ('UNITY'), case-insensitive."""
-    r = _rows("SELECT DISTINCT pattern_id, pattern_name FROM vrr_curated.pattern_vrr_monthly "
-              "WHERE upper(pattern_id)=upper(%(p)s) OR upper(pattern_name)=upper(%(p)s)",
+    r = _rows("SELECT id_pattern AS pattern_id, pattern_name FROM vrr_raw.pattern "
+              "WHERE upper(id_pattern)=upper(%(p)s) OR upper(pattern_name)=upper(%(p)s)",
               {"p": pattern})
     return r[0] if r else None
 
@@ -66,28 +66,31 @@ def _resolve(pattern: str) -> Optional[dict]:
 # ---- the deterministic tools ------------------------------------------------
 
 def list_patterns() -> list[dict]:
-    return _rows("SELECT pattern_id, max(pattern_name) pattern_name, count(*) n, "
-                 "max(vrr_date) last_date FROM vrr_curated.pattern_vrr_monthly "
-                 "GROUP BY pattern_id ORDER BY pattern_id")
+    return _rows("SELECT id_pattern AS pattern_id, max(pattern_name) pattern_name,"
+                 " count(*) n, max(vrr_date) last_date FROM vrr_curated.pattern_vrr"
+                 " WHERE grain='monthly' GROUP BY id_pattern ORDER BY id_pattern")
 
 
 @tracing.trace("VRR_TREND", span_type="TOOL")
 def vrr_trend(pattern: str, date_from: str | None = None,
-              date_to: str | None = None) -> dict:
+              date_to: str | None = None, grain: str = "monthly") -> dict:
     """The pattern's VRR series (the data behind the chart), optionally date-filtered."""
     p = _resolve(pattern)
     if not p:
         return {"found": False, "pattern": pattern}
     rows = _rows(
-        "SELECT pattern_id, pattern_name, vrr_date, vrr, prod_res_bbl, inj_res_bbl,"
-        " n_completions, any_extrapolated, run_id FROM vrr_curated.pattern_vrr_monthly"
-        " WHERE pattern_id=%(p)s AND (%(a)s::date IS NULL OR vrr_date >= %(a)s::date)"
+        "SELECT id_pattern AS pattern_id, pattern_name, vrr_date,"
+        " vrr_bblbbl AS vrr, res_production_volume_bbl AS prod_res_bbl,"
+        " res_injection_volume_bbl AS inj_res_bbl, pattern_pressure_psia,"
+        " n_completions, any_extrapolated, run_id FROM vrr_curated.pattern_vrr"
+        " WHERE grain=%(g)s AND id_pattern=%(p)s"
+        " AND (%(a)s::date IS NULL OR vrr_date >= %(a)s::date)"
         " AND (%(b)s::date IS NULL OR vrr_date <= %(b)s::date) ORDER BY vrr_date",
-        {"p": p["pattern_id"], "a": date_from, "b": date_to})
-    return {"found": bool(rows), "pattern_id": p["pattern_id"],
+        {"p": p["pattern_id"], "a": date_from, "b": date_to, "g": grain})
+    return {"found": bool(rows), "pattern_id": p["pattern_id"], "grain": grain,
             "pattern_name": p["pattern_name"], "rows": rows,
-            "provenance": {"table": "vrr_curated.pattern_vrr_monthly",
-                           "filter": {"pattern_id": p["pattern_id"],
+            "provenance": {"table": "vrr_curated.pattern_vrr", "grain": grain,
+                           "filter": {"id_pattern": p["pattern_id"],
                                       "from": date_from, "to": date_to}}}
 
 
@@ -95,23 +98,27 @@ def vrr_trend(pattern: str, date_from: str | None = None,
 def vrr_get(pattern: str, date: str) -> dict:
     p = _resolve(pattern)
     pid = p["pattern_id"] if p else pattern
-    r = _rows("SELECT * FROM vrr_curated.pattern_vrr_monthly "
-              "WHERE pattern_id=%(p)s AND vrr_date=%(d)s", {"p": pid, "d": date})
+    r = _rows("SELECT *, id_pattern AS pattern_id, vrr_bblbbl AS vrr,"
+              " res_production_volume_bbl AS prod_res_bbl,"
+              " res_injection_volume_bbl AS inj_res_bbl FROM vrr_curated.pattern_vrr "
+              "WHERE grain='monthly' AND id_pattern=%(p)s AND vrr_date=%(d)s",
+              {"p": pid, "d": date})
     if not r:
         return {"found": False, "pattern": pattern, "date": date}
     row = r[0]
     row["found"] = True
-    row["provenance"] = {"table": "vrr_curated.pattern_vrr_monthly",
-                         "keys": {"pattern_id": pid, "vrr_date": date}}
+    row["provenance"] = {"table": "vrr_curated.pattern_vrr",
+                         "keys": {"id_pattern": pid, "vrr_date": date, "grain": "monthly"}}
     return row
 
 
 def _term_totals(pattern_id: str, date: str) -> dict:
     r = _rows(
-        "SELECT sum(oil_res) oil_res, sum(water_res) water_res,"
-        " sum(coalesce(free_gas_res,0)) free_gas_res, sum(water_inj_res) water_inj_res,"
-        " sum(gas_inj_res) gas_inj_res FROM vrr_curated.completion_contrib"
-        " WHERE pattern_id=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date",
+        "SELECT sum(res_oil_volume_bbl) oil_res, sum(res_water_volume_bbl) water_res,"
+        " sum(coalesce(res_free_gas_volume_bbl,0)) free_gas_res,"
+        " sum(res_water_inj_volume_bbl) water_inj_res,"
+        " sum(res_gas_inj_volume_bbl) gas_inj_res FROM vrr_curated.completion_contrib"
+        " WHERE id_pattern=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date",
         {"p": pattern_id, "d": date})
     return {k: (v or 0.0) for k, v in (r[0] if r else {}).items()}
 
@@ -151,15 +158,17 @@ def vrr_lineage(pattern: str, date: str) -> dict:
     pid = p["pattern_id"]
     monthly = vrr_get(pid, date)
     completions = _rows(
-        "SELECT completion_id, count(*) n_days, min(pressure_psi) min_pressure,"
-        " max(pressure_psi) max_pressure, string_agg(DISTINCT pvt_method, ',') pvt_methods,"
-        " avg(factor) factor, sum(oil) oil, sum(water) water, sum(gas) gas,"
-        " sum(water_inj) water_inj, sum(gas_inj) gas_inj, sum(oil_res) oil_res,"
-        " sum(water_res) water_res, sum(coalesce(free_gas_res,0)) free_gas_res,"
-        " sum(water_inj_res) water_inj_res, sum(gas_inj_res) gas_inj_res"
-        " FROM vrr_curated.completion_contrib WHERE pattern_id=%(p)s"
-        " AND date_trunc('month', vrr_date)=%(d)s::date GROUP BY completion_id"
-        " ORDER BY completion_id", {"p": pid, "d": date})
+        "SELECT id_completion AS completion_id, count(*) n_days,"
+        " min(pattern_pressure_psia) min_pressure, max(pattern_pressure_psia) max_pressure,"
+        " string_agg(DISTINCT pvt_method, ',') pvt_methods, avg(factor) factor,"
+        " sum(oil_volume_bbl) oil, sum(water_volume_bbl) water, sum(gas_volume_kscf) gas,"
+        " sum(water_inj_volume_bbl) water_inj, sum(gas_inj_volume_kscf) gas_inj,"
+        " sum(res_oil_volume_bbl) oil_res, sum(res_water_volume_bbl) water_res,"
+        " sum(coalesce(res_free_gas_volume_bbl,0)) free_gas_res,"
+        " sum(res_water_inj_volume_bbl) water_inj_res, sum(res_gas_inj_volume_bbl) gas_inj_res"
+        " FROM vrr_curated.completion_contrib WHERE id_pattern=%(p)s"
+        " AND date_trunc('month', vrr_date)=%(d)s::date GROUP BY id_completion"
+        " ORDER BY id_completion", {"p": pid, "d": date})
     totals = _term_totals(pid, date)
     prod = sum(totals.get(t, 0.0) for t in DC.PROD_TERMS)
     inj = sum(totals.get(t, 0.0) for t in DC.INJ_TERMS)
@@ -170,19 +179,21 @@ def vrr_lineage(pattern: str, date: str) -> dict:
         "recomputed_from_terms": {"prod_res_bbl": prod, "inj_res_bbl": inj,
                                   "vrr": physics.vrr(inj, prod)},
         "formulas": {
-            "oil_res": "FACTOR · OIL · Bo",
-            "water_res": "FACTOR · WATER · Bw",
-            "free_gas_res": "FACTOR · (GAS·1000 − Rs·OIL) · Bg   [producers, OIL>0]",
-            "water_inj_res": "FACTOR · WATER_INJ · Bw_inj",
-            "gas_inj_res": "FACTOR · GAS_INJ·1000 · Bg_inj",
-            "vrr": "Σ(water_inj_res + gas_inj_res) / Σ(oil_res + water_res + free_gas_res)",
+            "res_oil_volume_bbl": "FACTOR · OIL_VOL · Bo",
+            "res_water_volume_bbl": "FACTOR · WATER_VOL · Bw",
+            "res_free_gas_volume_bbl":
+                "((GAS_VOL·1000) − Rs·OIL_VOL) · FACTOR · Bg   [producers, OIL_VOL>0]",
+            "res_water_inj_volume_bbl": "FACTOR · WATER_INJ_VOL · Bw_inj",
+            "res_gas_inj_volume_bbl": "GAS_INJ_VOL·1000 · FACTOR · Bg_inj",
+            "vrr_bblbbl": "COALESCE(RES_INJECTION_VOLUME / NULLIF(RES_PRODUCTION_VOLUME,0), 0)",
         },
         "sources": {
-            "raw_volumes": "vrr_raw.production_volumes_daily",
-            "pressure": "vrr_raw.pattern_pressure (latest reading ≤ production date)",
-            "pvt": "vrr_raw.completion_pvt → core.physics.pvt_lookup (method per row)",
+            "raw_volumes": "vrr_raw.production_volumes_daily (per completion)",
+            "allocation": "vrr_raw.pattern_contribution_factor (windowed by effect_date)",
+            "pressure": "vrr_raw.pattern_pressure (windowed; reading holds to the next)",
+            "pvt": "vrr_raw.completion_pvt_characteristics → core.physics.pvt_lookup",
             "lineage_layer": "vrr_curated.completion_contrib",
-            "aggregate": "vrr_curated.pattern_vrr_monthly",
+            "aggregate": "vrr_curated.pattern_vrr (grain=monthly)",
             "code": "vrr_agent_open.core.physics.completion_contribution",
         },
     }
@@ -202,29 +213,56 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     pid = p["pattern_id"]
 
     pvt_points: dict[str, list] = {}
-    for r in _rows("SELECT * FROM vrr_raw.completion_pvt"):
-        pvt_points.setdefault(r["completion_id"], []).append(physics.PVTPoint(
-            pressure_psi=r["pressure_psi"], bo=r["bo"], bw=r["bw"], bg=r["bg"],
-            rs=r["rs"], rv=r["rv"], bw_inj=r["bw_inj"], bg_inj=r["bg_inj"]))
+    for r in _rows("SELECT * FROM vrr_raw.completion_pvt_characteristics"):
+        pvt_points.setdefault((r["id_completion"], r["test_date"]), []).append(
+            physics.PVTPoint(pressure_psi=r["pressure"], bo=r["bo"], bw=r["bw"],
+                             bg=r["bg"], rs=r["rs"], rv=r["rv"],
+                             bw_inj=r["bw_inj"], bg_inj=r["bg_inj"]))
 
+    # Recompute the month from RAW, redoing the windowed joins independently of the
+    # builder: volumes ⋈ contribution-factor window ⋈ pressure window.
     raw = _rows(
-        "SELECT v.*, (SELECT pressure_psi FROM vrr_raw.pattern_pressure pp"
-        "   WHERE pp.pattern_id=v.pattern_id AND pp.vrr_date<=v.vrr_date"
-        "   ORDER BY pp.vrr_date DESC LIMIT 1) pressure_psi"
-        " FROM vrr_raw.production_volumes_daily v WHERE v.pattern_id=%(p)s"
-        " AND date_trunc('month', v.vrr_date)=%(d)s::date", {"p": pid, "d": date})
+        "WITH factors AS (SELECT id_completion, id_pattern, factor, effect_date,"
+        "   LEAD(effect_date) OVER (PARTITION BY id_completion, id_pattern"
+        "                           ORDER BY effect_date) end_date"
+        "   FROM vrr_raw.pattern_contribution_factor),"
+        " pressures AS (SELECT id_pattern, pressure_date, pressure,"
+        "   LEAD(pressure_date) OVER (PARTITION BY id_pattern"
+        "                             ORDER BY pressure_date) end_date"
+        "   FROM vrr_raw.pattern_pressure)"
+        " SELECT v.id_completion, v.prod_date, v.uom, f.factor, pr.pressure,"
+        "   GREATEST(COALESCE(v.alloc_oil_vol_stb,0),0) oil,"
+        "   GREATEST(COALESCE(v.alloc_water_vol_stb,0),0) water,"
+        "   GREATEST(COALESCE(v.alloc_gas_vol_kscf,0),0) gas,"
+        "   GREATEST(COALESCE(v.alloc_water_inj_vol_stb,0),0) water_inj,"
+        "   GREATEST(COALESCE(v.alloc_gas_inj_vol_kscf,0),0) gas_inj"
+        " FROM vrr_raw.production_volumes_daily v"
+        " JOIN factors f ON f.id_completion=v.id_completion"
+        "   AND v.prod_date >= f.effect_date"
+        "   AND (f.end_date IS NULL OR v.prod_date < f.end_date)"
+        " LEFT JOIN pressures pr ON pr.id_pattern=f.id_pattern"
+        "   AND v.prod_date >= pr.pressure_date"
+        "   AND (pr.end_date IS NULL OR v.prod_date < pr.end_date)"
+        " WHERE f.id_pattern=%(p)s AND date_trunc('month', v.prod_date)=%(d)s::date",
+        {"p": pid, "d": date})
     if not raw:
         return {"ok": False, "reason": f"no raw rows for {pid} in {date}"}
 
     prod = inj = 0.0
     methods: set[str] = set()
+    tests = sorted({k[1] for k in pvt_points})
     for r in raw:
-        pvt = physics.pvt_lookup(pvt_points.get(r["completion_id"], []), r["pressure_psi"])
+        applicable = [d for d in tests if d <= r["prod_date"]]
+        tdate = applicable[-1] if applicable else (tests[0] if tests else None)
+        pvt = physics.pvt_lookup(pvt_points.get((r["id_completion"], tdate), []),
+                                 r["pressure"])
         methods.add(pvt.method)
+        producing = (r["oil"] + r["water"] + r["gas"]) > 0      # derived Amount_Type
         t = physics.completion_contribution(
             factor=r["factor"], oil=r["oil"], water=r["water"], gas=r["gas"],
             water_inj=r["water_inj"], gas_inj=r["gas_inj"], pvt=pvt.props,
-            is_producer=(r["amount_type"] == "Production"))
+            is_producer=producing,
+            gas_kscf_to_scf=1000.0 if (r["uom"] or "OilField") == "OilField" else 1.0)
         prod += t.prod_res
         inj += t.inj_res
 
@@ -243,8 +281,9 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
         "pvt_methods": sorted(methods),
         "low_confidence_inputs": bool(methods & {physics.EXTRAP, physics.CLOSEST, physics.NONE}),
         "provenance": {"recomputed_from": ["vrr_raw.production_volumes_daily",
+                                           "vrr_raw.pattern_contribution_factor",
                                            "vrr_raw.pattern_pressure",
-                                           "vrr_raw.completion_pvt"],
+                                           "vrr_raw.completion_pvt_characteristics"],
                        "code": "core.physics.pvt_lookup + completion_contribution"},
     }
 
@@ -268,15 +307,17 @@ def list_completions(pattern: str, date: str | None = None) -> dict:
         date = str(rows[-1]["vrr_date"])
 
     completions = _rows(
-        "SELECT completion_id, count(*) n_days, avg(factor) factor,"
+        "SELECT id_completion AS completion_id, count(*) n_days, avg(factor) factor,"
         " string_agg(DISTINCT pvt_method, ',') pvt_methods,"
-        " min(pressure_psi) min_pressure, max(pressure_psi) max_pressure,"
-        " sum(oil) oil, sum(water) water, sum(gas) gas, sum(water_inj) water_inj,"
-        " sum(gas_inj) gas_inj, sum(oil_res) oil_res, sum(water_res) water_res,"
-        " sum(coalesce(free_gas_res,0)) free_gas_res, sum(water_inj_res) water_inj_res,"
-        " sum(gas_inj_res) gas_inj_res FROM vrr_curated.completion_contrib"
-        " WHERE pattern_id=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date"
-        " GROUP BY completion_id ORDER BY completion_id", {"p": pid, "d": date})
+        " min(pattern_pressure_psia) min_pressure, max(pattern_pressure_psia) max_pressure,"
+        " sum(oil_volume_bbl) oil, sum(water_volume_bbl) water, sum(gas_volume_kscf) gas,"
+        " sum(water_inj_volume_bbl) water_inj, sum(gas_inj_volume_kscf) gas_inj,"
+        " sum(res_oil_volume_bbl) oil_res, sum(res_water_volume_bbl) water_res,"
+        " sum(coalesce(res_free_gas_volume_bbl,0)) free_gas_res,"
+        " sum(res_water_inj_volume_bbl) water_inj_res,"
+        " sum(res_gas_inj_volume_bbl) gas_inj_res FROM vrr_curated.completion_contrib"
+        " WHERE id_pattern=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date"
+        " GROUP BY id_completion ORDER BY id_completion", {"p": pid, "d": date})
 
     prod_total = sum(c["oil_res"] + c["water_res"] + c["free_gas_res"] for c in completions)
     inj_total = sum(c["water_inj_res"] + c["gas_inj_res"] for c in completions)
@@ -306,16 +347,17 @@ def pattern_context(pattern: str) -> dict:
     if not p:
         return {"found": False, "pattern": pattern}
     pid = p["pattern_id"]
-    mem = _rows("SELECT * FROM vrr_agent.pattern_memory WHERE pattern_id=%(p)s", {"p": pid})
-    tgt = _rows("SELECT target_vrr FROM vrr_raw.pattern_target WHERE pattern_id=%(p)s", {"p": pid})
+    mem = _rows("SELECT * FROM vrr_agent.pattern_memory WHERE id_pattern=%(p)s", {"p": pid})
+    tgt = _rows("SELECT target_vrr FROM vrr_raw.pattern_target WHERE id_pattern=%(p)s", {"p": pid})
     return {
         "found": True, "pattern_id": pid, "pattern_name": p["pattern_name"],
         "target_vrr": (tgt[0]["target_vrr"] if tgt else CFG.default_target_vrr),
         "memory": mem[0] if mem else {},
-        "safety_limits": _rows("SELECT * FROM vrr_agent.safety_limits WHERE pattern_id=%(p)s",
+        "safety_limits": _rows("SELECT *, id_completion AS completion_id FROM"
+                               " vrr_agent.safety_limits WHERE id_pattern=%(p)s",
                                {"p": pid}),
         "adjustment_history": _rows(
-            "SELECT * FROM vrr_agent.adjustment_history WHERE pattern_id=%(p)s"
+            "SELECT * FROM vrr_agent.adjustment_history WHERE id_pattern=%(p)s"
             " ORDER BY ts DESC LIMIT 20", {"p": pid}),
     }
 
@@ -341,10 +383,11 @@ def _injector_states(pattern_id: str, date: str) -> list[RE.InjectorState]:
     """Current injector state for the month, straight off the lineage layer.
     ``bw_inj`` is recovered as inj_res/(FACTOR·surface) — the same FVF the build used."""
     rows = _rows(
-        "SELECT completion_id, avg(factor) factor, sum(water_inj) surface,"
-        " sum(water_inj_res) inj_res FROM vrr_curated.completion_contrib"
-        " WHERE pattern_id=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date"
-        " AND water_inj > 0 GROUP BY completion_id ORDER BY completion_id",
+        "SELECT id_completion AS completion_id, avg(factor) factor,"
+        " sum(water_inj_volume_bbl) surface, sum(res_water_inj_volume_bbl) inj_res"
+        " FROM vrr_curated.completion_contrib"
+        " WHERE id_pattern=%(p)s AND date_trunc('month', vrr_date)=%(d)s::date"
+        " AND water_inj_volume_bbl > 0 GROUP BY id_completion ORDER BY id_completion",
         {"p": pattern_id, "d": date})
     out = []
     for r in rows:
@@ -406,7 +449,7 @@ def submit_for_approval(pattern: str, date: str, *, draft: dict,
     """
     action_id = f"ACT-{uuid.uuid4().hex[:10]}"
     _execute(
-        "INSERT INTO vrr_agent.action_queue (action_id, pattern_id, pattern_name,"
+        "INSERT INTO vrr_agent.action_queue (action_id, id_pattern, pattern_name,"
         " vrr_date, anomaly_kind, severity, anomaly_detail, driver, action_type,"
         " recommendation, precedent, confidence, narrative, stage, stage_by, stage_ts)"
         " VALUES (%(id)s,%(pid)s,%(name)s,%(d)s,%(kind)s,%(sev)s,%(det)s,%(drv)s,"

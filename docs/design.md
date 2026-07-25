@@ -1,5 +1,7 @@
 # vrr_agent_open — design & feasibility
 
+Data model reference (production → local mapping): [vrr_data_model.md](vrr_data_model.md).
+
 An **all open-source, all-local** port of the Databricks VRR Reasoning & Lineage agent.
 Same trust model — *the LLM never computes; every number comes from a deterministic
 tool with provenance; a faithfulness gate rejects unsupported narration; recommendations
@@ -61,7 +63,7 @@ registration (UC OSS REST, was DAB resources).
 ```mermaid
 flowchart LR
     RAW[("Postgres vrr_raw")] --> BUILD["vrr_build (SQL + core/physics)"]
-    BUILD --> CUR[("vrr_curated.completion_contrib → pattern_vrr_monthly")]
+    BUILD --> CUR[("vrr_curated.completion_contrib → pattern_vrr (daily+monthly)")]
     CUR --> ANOM["anomaly + recommend"] --> Q[("vrr_agent.action_queue")]
     Q --> APP["👤 Streamlit approval"] --> AH[("adjustment_history")]
     AH --> LEARN["ρ EMA → pattern_memory"] --> ANOM
