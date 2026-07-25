@@ -150,6 +150,12 @@ with tab_portfolio:
         st.dataframe(show, width="stretch", hide_index=True)
         st.caption("Pick a pattern in the sidebar to open it in the other tabs.")
 
+    audits = T.input_audit()
+    if audits.get("n"):
+        st.caption("Input-audit verdicts (latest audited period per pattern): "
+                   + " · ".join(f"**{k}** {v}" for k, v in sorted(audits["by_verdict"].items()))
+                   + " — only REAL_SIGNAL periods may carry a valve recommendation.")
+
     with st.expander("Ingestion data quality (DATA_QUALITY)"):
         dq = T.data_quality()
         if dq.get("ok"):
@@ -178,9 +184,19 @@ with tab_report:
               delta_color="off")
     k3.metric("Injection (res bbl)", f"{sel['inj_res_bbl']:,.0f}")
     k4.metric("Production (res bbl)", f"{sel['prod_res_bbl']:,.0f}")
-    if sel["any_extrapolated"]:
+    ia = T.input_audit(pid)
+    stored_audit = next((r for r in ia.get("audits", []) if r["vrr_date"] == period), None)
+    if stored_audit:
+        icon = {"REAL_SIGNAL": "✅", "DATA_ARTIFACT": "🛑", "INCONCLUSIVE": "⚠️"}.get(
+            stored_audit["verdict"], "•")
+        box = st.success if stored_audit["verdict"] == "REAL_SIGNAL" else st.warning
+        box(f"{icon} Input audit: **{stored_audit['verdict']}** — {stored_audit['summary']}")
+        if stored_audit["verdict"] != "REAL_SIGNAL":
+            st.caption("Guardrail: no valve change may be proposed on this period — it "
+                       "routes to the data steward instead (core/audit.py).")
+    elif sel["any_extrapolated"]:
         st.warning("⚠️ This period used extrapolated/closest PVT lookups — inputs are "
-                   "suspect. Guardrail: no valve change on suspect inputs.")
+                   "suspect. Run `make audit` to record a verdict.")
 
     base = alt.Chart(df).encode(x=alt.X("vrr_date:T", title=None))
     band_layer = alt.Chart(pd.DataFrame({"lo": [band[0]], "hi": [band[1]]})).mark_rect(

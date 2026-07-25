@@ -39,6 +39,8 @@ def run(pattern: str | None = None, date: str | None = None) -> list[dict]:
         queued.append({"action_id": res["action_id"], "pattern": case["pattern_name"],
                        "vrr_date": case["vrr_date"], "severity": draft["severity"],
                        "action_type": draft["action_type"],
+                       "owner_role": draft.get("owner_role"),
+                       "verdict": draft.get("audit_verdict"),
                        "confidence": draft["confidence"]})
     return queued
 
@@ -48,4 +50,5 @@ if __name__ == "__main__":
     day = sys.argv[2] if len(sys.argv) > 2 else None
     for row in run(pat, day):
         print(f"  queued {row['action_id']}  {row['pattern']} {row['vrr_date']}"
-              f"  [{row['severity']}] {row['action_type']} ({row['confidence']})")
+              f"  [{row['severity']}] {row['action_type']} → {row['owner_role']}"
+              f"  verdict={row['verdict']} ({row['confidence']})")

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from ..config import TARGET_BAND
 from ..core import anomaly as AN
+from ..core import audit as AU
 from ..core import decompose as DC
 from . import tools as T
 from . import tracing
@@ -53,8 +54,11 @@ def analyze(pattern: str, date: str | None = None) -> dict:
             if mem.get("typical_low") and mem.get("typical_high") else TARGET_BAND)
     vrr = period["vrr"]
 
-    # 1 — verify before explaining
+    # 1 — verify before explaining, and let the verdict (not a single flag) decide
+    #     whether a valve change may even be proposed (parent Slice A)
     audit = T.vrr_audit(pid, date)
+    audit_verdict = audit.get("verdict") or AU.INCONCLUSIVE
+    route = audit.get("route") or AU.route_for(audit_verdict)
 
     # 2 — attribute the change vs the prior period
     prior = _prev_month(date)
@@ -67,21 +71,38 @@ def analyze(pattern: str, date: str | None = None) -> dict:
         [r for r in history if str(r["vrr_date"]) <= date],
         target_vrr=target, band=band)
 
-    # 4 — propose (only the deterministic engine may size a change)
-    rec = T.recommend_change(pid, date)
+    # 4 — propose (only the deterministic engine may size a change, and only on
+    #     inputs the audit cleared)
+    rec = (T.recommend_change(pid, date) if audit_verdict == AU.REAL_SIGNAL else
+           {"ok": False,
+            "reason": f"input audit returned {audit_verdict}: {route['note']}",
+            "verdict": audit_verdict})
     driver = decomp.get("dominant_driver") if decomp.get("ok") else None
     precedent = T.find_precedent(pid, driver=driver)
     precedent = precedent if precedent.get("found") else None
 
-    # 5 — draft for approval, anchored on the most severe anomaly
+    # 5 — draft for approval, anchored on the most severe anomaly. A DATA_ARTIFACT
+    #     verdict makes this a data-steward item, never a valve change.
     draft = None
-    if anomalies:
-        primary = sorted(anomalies, key=lambda a: {"high": 0, "medium": 1, "low": 2}[a.severity])[0]
+    if anomalies or audit_verdict == AU.DATA_ARTIFACT:
+        primary = (sorted(anomalies,
+                          key=lambda a: {"high": 0, "medium": 1, "low": 2}[a.severity])[0]
+                   if anomalies else
+                   AN.Anomaly(kind="input_audit", severity="high",
+                              detail=audit.get("audit", {}).get("summary", "inputs suspect"),
+                              vrr_date=date, vrr=vrr, actionable=False))
         draft = AN.build_draft(
             pattern_id=pid, pattern_name=name, anomaly=primary, recommendation=rec,
             driver=driver, precedent=precedent,
             response_factor=mem.get("response_factor") or 1.0,
             n_adjustments=mem.get("n_adjustments") or 0)
+        if audit_verdict != AU.REAL_SIGNAL:
+            draft["action_type"] = route["action_type"] or "investigate_inputs"
+            draft["owner_role"] = route["owner_role"]
+            draft["recommendation"] = None
+        else:
+            draft["owner_role"] = "analyst"
+        draft["audit_verdict"] = audit_verdict
 
     verdict = ("on target" if band[0] <= vrr <= band[1] else
                "OVER-replicating (injecting too much)" if vrr > band[1] else
@@ -90,7 +111,9 @@ def analyze(pattern: str, date: str | None = None) -> dict:
     case = {
         "ok": True, "pattern_id": pid, "pattern_name": name, "vrr_date": date,
         "vrr": vrr, "target_vrr": target, "band": list(band), "verdict": verdict,
-        "period": period, "audit": audit, "decompose": decomp,
+        "period": period, "audit": audit, "audit_verdict": audit_verdict,
+        "audit_route": route,
+        "decompose": decomp,
         "anomalies": [a.__dict__ for a in anomalies], "recommendation": rec,
         "precedent": precedent, "draft": draft, "memory": mem,
         "safety_limits": ctx["safety_limits"],
@@ -133,14 +156,17 @@ def narrate(case: dict) -> str:
     a = case.get("audit") or {}
     if a.get("ok"):
         L.append("")
-        L.append("**1. Is the number right?**")
+        icon = {"REAL_SIGNAL": "✅", "DATA_ARTIFACT": "🛑", "INCONCLUSIVE": "⚠️"}.get(
+            case.get("audit_verdict"), "•")
+        L.append(f"**1. Input audit — {icon} {case.get('audit_verdict')}**")
+        L.append((a.get("audit") or {}).get("summary", ""))
         mark = "✅ matches" if a["matches"] else "⚠️ MISMATCH"
         L.append(f"Recomputed from {a['n_raw_rows']} raw daily rows with core.physics: "
                  f"{a['recomputed']['vrr']:.3f} vs stored {a['stored']['vrr']:.3f} — {mark} "
                  f"(diff {a['difference']:+.2e}).")
-        L.append(f"PVT lookups used: {', '.join(a['pvt_methods'])}."
-                 + (" ⚠️ Low-confidence PVT — inputs are suspect, so no valve change "
-                    "should be made on this period." if a["low_confidence_inputs"] else ""))
+        L.append(f"PVT lookups used: {', '.join(a['pvt_methods'])}.")
+        for f in (a.get("audit") or {}).get("findings", []):
+            L.append(f"- [{f['severity']}] {f['code']}: {f['detail']}")
         L.append(f"Sources: {', '.join(a['provenance']['recomputed_from'])} → "
                  f"vrr_curated.completion_contrib → vrr_curated.pattern_vrr "
                  f"(run_id {a['stored'].get('run_id')}).")
@@ -176,12 +202,13 @@ def narrate(case: dict) -> str:
     r = case.get("recommendation") or {}
     L.append("")
     L.append("**4. Recommended action**")
-    if not r.get("ok"):
-        L.append(f"No recommendation: {r.get('reason')}")
-    elif any(an["actionable"] is False and an["kind"] == "extrapolated_pvt"
-             for an in case["anomalies"]):
-        L.append("Inputs failed the audit (extrapolated PVT) — investigate source data. "
+    if case.get("audit_verdict") != AU.REAL_SIGNAL:
+        route_ = case.get("audit_route") or {}
+        L.append(f"Input audit returned **{case.get('audit_verdict')}** — "
+                 f"{route_.get('note')}. Owner: **{route_.get('owner_role')}**. "
                  "No valve change proposed (guardrail: never act on suspect inputs).")
+    elif not r.get("ok"):
+        L.append(f"No recommendation: {r.get('reason')}")
     elif r.get("direction") == "none":
         L.append(r.get("note", "Within tolerance; no change."))
     else:

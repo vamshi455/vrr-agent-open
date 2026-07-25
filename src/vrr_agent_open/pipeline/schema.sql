@@ -211,6 +211,22 @@ CREATE TABLE IF NOT EXISTS vrr_agent.pattern_memory (
   response_factor double precision DEFAULT 1.0, n_adjustments int DEFAULT 0,
   tendencies text, updated_at timestamptz
 );
+-- Input-audit verdicts (parent Slice A): is a flagged VRR a real reservoir signal or a
+-- data artifact? Written by pipeline/input_audit.py after each build; read by the agent
+-- before it is allowed to propose a valve change.
+CREATE TABLE IF NOT EXISTS vrr_agent.input_audit (
+  id_pattern text NOT NULL,
+  pattern_name text,
+  vrr_date date NOT NULL,
+  verdict text NOT NULL,                     -- DATA_ARTIFACT | INCONCLUSIVE | REAL_SIGNAL
+  actionable boolean,
+  summary text,
+  findings jsonb,
+  run_id text,
+  audited_at timestamptz DEFAULT now(),
+  PRIMARY KEY (id_pattern, vrr_date)
+);
+
 CREATE TABLE IF NOT EXISTS vrr_agent.adjustment_history (
   action_id text, id_pattern text, pattern_name text, vrr_date date, driver text,
   anomaly text, change_type text, d_inj_res_bbl double precision, d_surface_pct double precision,

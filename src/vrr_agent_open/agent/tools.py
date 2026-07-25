@@ -15,7 +15,8 @@ The toolbelt, in the order an analyst usually needs it:
   VRR_DECOMPOSE      ΔVRR attribution a→b (core.decompose, exact + additive)
   LIST_COMPLETIONS   the completions in a pattern, role + share of production/injection
   VRR_LINEAGE        how THIS number was built: monthly ← completions ← raw + PVT
-  VRR_AUDIT          recompute from raw with core.physics and diff vs the stored value
+  VRR_AUDIT          recompute from raw + core.audit verdict (DATA_ARTIFACT/REAL_SIGNAL)
+  INPUT_AUDIT        stored verdicts per pattern-period (the input-audit gate)
   PATTERN_CONTEXT    target, learned band/ρ, safety limits, prior adjustments
   DETECT_ANOMALIES   core.anomaly over the pattern's history
   RECOMMEND_CHANGE   core.recommend — bounded, ρ-calibrated valve change
@@ -32,6 +33,7 @@ import psycopg
 
 from ..config import load_config
 from ..core import anomaly as AN
+from ..core import audit as AU
 from ..core import decompose as DC
 from ..core import physics
 from ..core import recommend as RE
@@ -280,7 +282,15 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     stored = vrr_get(pid, date)
     stored_vrr = stored.get("vrr")
     diff = None if (recomputed is None or stored_vrr is None) else recomputed - stored_vrr
+    # The audit is not just "do the numbers match" — core.audit turns what we observed
+    # into the decision the workflow needs (parent Slice A).
+    verdict = AU.assess_inputs(
+        n_rows=len(raw), pvt_methods=sorted(methods),
+        n_missing_pressure=sum(1 for r in raw if r["pressure"] is None),
+        recompute_difference=diff, tolerance=tolerance)
     return {
+        "audit": verdict, "verdict": verdict["verdict"],
+        "actionable": verdict["actionable"], "route": AU.route_for(verdict["verdict"]),
         "ok": True, "pattern_id": pid, "pattern_name": p["pattern_name"],
         "vrr_date": date, "n_raw_rows": len(raw),
         "recomputed": {"vrr": recomputed, "prod_res_bbl": prod, "inj_res_bbl": inj},
@@ -443,6 +453,32 @@ def list_completions(pattern: str, date: str | None = None) -> dict:
         "provenance": {"table": "vrr_curated.completion_contrib",
                        "keys": {"pattern_id": pid, "month": date}},
     }
+
+
+@tracing.trace("INPUT_AUDIT", span_type="TOOL")
+def input_audit(pattern: str | None = None, verdict: str | None = None) -> dict:
+    """Stored input-audit verdicts (``pipeline/input_audit.py``) — one per pattern-period.
+
+    Cheap to read, so the agent and the portfolio view can ask "which periods are even
+    trustworthy?" without recomputing anything.
+    """
+    pid = None
+    if pattern:
+        p = _resolve(pattern)
+        if not p:
+            return {"found": False, "pattern": pattern}
+        pid = p["pattern_id"]
+    rows = _rows(
+        "SELECT id_pattern, pattern_name, vrr_date, verdict, actionable, summary,"
+        " findings, run_id, audited_at FROM vrr_agent.input_audit"
+        " WHERE (%(p)s::text IS NULL OR id_pattern = %(p)s)"
+        "   AND (%(v)s::text IS NULL OR verdict = %(v)s)"
+        " ORDER BY vrr_date DESC, pattern_name", {"p": pid, "v": verdict})
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+    return {"found": bool(rows), "n": len(rows), "by_verdict": counts, "audits": rows,
+            "provenance": {"table": "vrr_agent.input_audit"}}
 
 
 @tracing.trace("PATTERN_CONTEXT", span_type="TOOL")
@@ -614,6 +650,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
           {**_PATTERN, **_DATE}, ["pattern", "date"]),
     _spec("LIST_COMPLETIONS", "List the completions in a pattern with role and share of VRR.",
           {**_PATTERN, **_DATE}, ["pattern"]),
+    _spec("INPUT_AUDIT", "Stored input-audit verdicts: is a period's data trustworthy?",
+          {**_PATTERN, "verdict": {"type": "string"}}, []),
     _spec("PATTERN_CONTEXT", "Target, learned band/rho, safety limits, adjustment history.",
           _PATTERN, ["pattern"]),
     _spec("DETECT_ANOMALIES", "Run the deterministic anomaly rules over a pattern.",
@@ -636,6 +674,7 @@ DISPATCH = {
     "VRR_LINEAGE": lambda a: vrr_lineage(a["pattern"], a["date"]),
     "VRR_AUDIT": lambda a: vrr_audit(a["pattern"], a["date"]),
     "LIST_COMPLETIONS": lambda a: list_completions(a["pattern"], a.get("date")),
+    "INPUT_AUDIT": lambda a: input_audit(a.get("pattern"), a.get("verdict")),
     "PATTERN_CONTEXT": lambda a: pattern_context(a["pattern"]),
     "DETECT_ANOMALIES": lambda a: detect_anomalies(a["pattern"]),
     "RECOMMEND_CHANGE": lambda a: recommend_change(a["pattern"], a.get("date")),
