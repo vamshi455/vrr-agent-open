@@ -86,6 +86,61 @@ or the sidebar selection, and builds the answer from tool output. Then:
   (every decimal in the text must match a tool-produced figure). On failure the computed
   text is shown instead, with the violation displayed.
 
+## Two data sources the chat can query
+
+| Source | Tool | What it answers |
+|---|---|---|
+| **Postgres relational** (`vrr_raw`, `vrr_curated`, `vrr_agent`) | `VRR_GET`, `VRR_TREND`, `VRR_DECOMPOSE`, `VRR_LINEAGE`, `VRR_AUDIT`, `PATTERN_CONTEXT`, `DETECT_ANOMALIES`, `RECOMMEND_CHANGE`, `FIND_PRECEDENT`, `SUBMIT_FOR_APPROVAL` | anything about *your* numbers |
+| **Postgres pgvector** (`vrr_agent.reservoir_knowledge`) | `SEARCH_KNOWLEDGE` | what your ingested documents say |
+
+The `knowledge` intent is RAG: the query is embedded locally (`nomic-embed-text`), the
+nearest chunks come back from `embedding <=> query` (cosine), and the model may only
+summarise **those excerpts** — it is instructed to say "not in the documents" rather
+than answer from its own knowledge, and every answer cites file + page.
+
+### Steps: load documents into pgvector
+
+```bash
+ollama pull nomic-embed-text                     # 768-dim embeddings, local
+mkdir -p knowledge_uploads && cp <your.pdf> knowledge_uploads/
+make knowledge                                   # 1. REGISTER → status pending_review
+psql "$VRR_PG_DSN" -c "UPDATE vrr_agent.knowledge_registry \
+      SET status='approved', reviewed_by='<you>' WHERE file_name='<your.pdf>'"   # 2. HUMAN review
+make knowledge                                   # 3. chunk → PII-redact → embed → store
+```
+
+Step 2 is deliberately manual: only a human decides a document is VRR-relevant and fit
+to embed (guardrail in [knowledge-flow.md](knowledge-flow.md)). PII is redacted before
+embedding, so it never reaches the index. Then ask in the chat tab: *"What do the
+documents say about changing injection rates?"*
+
+Requires the `vector` extension in Postgres (the compose image has it; a bare local
+Postgres needs `brew install pgvector` + `CREATE EXTENSION vector`).
+
+### Steps: add your own tool
+
+1. **Write the function** in [`agent/tools.py`](../src/vrr_agent_open/agent/tools.py).
+   Take plain args, return a JSON-serialisable dict, and include a `provenance` key
+   naming the table(s) it read:
+   ```python
+   def injector_pressure(pattern: str, date: str) -> dict:
+       rows = _rows("SELECT ... FROM vrr_raw.pattern_pressure WHERE ...",
+                    {"p": pattern, "d": date})
+       return {"rows": rows, "provenance": {"table": "vrr_raw.pattern_pressure"}}
+   ```
+2. **Declare it** to the model in `TOOL_SPECS` via the `_spec(...)` helper — name in
+   CAPS, one-line description, JSON-schema parameters.
+3. **Dispatch it** in `DISPATCH`: `"INJECTOR_PRESSURE": lambda a: injector_pressure(a["pattern"], a["date"])`.
+4. **(Optional) route it deterministically** — add keywords to `INTENTS` in
+   [`agent/chat.py`](../src/vrr_agent_open/agent/chat.py) if you want the tool used
+   without waiting for the model to choose it.
+5. **Mention it in the primer** (`DOMAIN` in `agent/graph.py`) if the model needs to
+   know when to reach for it.
+
+Nothing else changes: the agentic loop picks it up automatically, errors are returned as
+`{"error": ...}` rather than crashing the loop, and any number it returns is added to
+the whitelist the faithfulness gate checks the narration against.
+
 ## Lineage — what is actually stored
 
 `vrr_curated.completion_contrib` is the lineage layer: one row per

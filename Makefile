@@ -1,4 +1,4 @@
-.PHONY: up down install test seed build queue register app agent lint
+.PHONY: up down install test seed build knowledge queue register app agent lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
 	docker compose up -d
@@ -17,6 +17,9 @@ seed:          ## generate + load synthetic VRR data into Postgres
 
 build:         ## rebuild vrr_curated from vrr_raw only (core.physics; no reseed)
 	python -m vrr_agent_open.pipeline.build
+
+knowledge:     ## register PDFs in ./knowledge_uploads, then ingest the APPROVED ones
+	python -m vrr_agent_open.pipeline.knowledge_ingest
 
 queue:         ## run the anomaly → action_queue job (drafts for human approval)
 	python -m vrr_agent_open.pipeline.anomaly_to_queue

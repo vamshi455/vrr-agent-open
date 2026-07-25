@@ -9,3 +9,4 @@ dist/
 .env
 mlruns/
 .DS_Store
+knowledge_uploads/

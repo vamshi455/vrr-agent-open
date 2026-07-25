@@ -38,11 +38,15 @@ INTENTS = (
                  "how do you compute", "how is it computed", "formula", "built from")),
     ("audit", ("audit", "verify", "correct", "accurate", "double check", "double-check",
                "prove", "sanity check", "recompute", "reconcile", "trust", "right?")),
+    # knowledge BEFORE recommend: "what do the documents say about changing injection"
+    # is a document question, not a request for a valve change.
+    ("knowledge", ("document", "handbook", "literature", "paper", "manual", "guideline",
+                   "guidance", "policy", "procedure", "sop", "standard", "reference say",
+                   "knowledge base", "what does the doc")),
     ("recommend", ("recommend", "what should", "fix", "valve", "adjust", "change injection",
                    "action", "remediate")),
     ("submit", ("submit", "send for approval", "queue it", "raise a draft", "send to rm",
                 "approval")),
-    ("knowledge", ("document", "handbook", "literature", "paper", "manual", "guideline")),
     ("list", ("list patterns", "which patterns", "what patterns", "all patterns")),
     ("explain", ("why", "explain", "driver", "cause", "high", "low", "increase", "decrease",
                  "drift", "what happened")),
@@ -179,6 +183,47 @@ GENERAL_SYSTEM = (
 )
 
 
+KNOWLEDGE_SYSTEM = (
+    "Answer the question USING ONLY the document excerpts provided. Quote or paraphrase "
+    "them; cite the file name and page for each claim. If the excerpts do not contain "
+    "the answer, say so plainly — do not fall back on your own knowledge, and never "
+    "state a number that is not in the excerpts."
+)
+
+
+def _knowledge_answer(question: str, use_llm: bool = True, k: int = 4) -> dict:
+    """RAG over the pgvector index: `embedding <=> query` in Postgres, then a grounded
+    summary. Retrieval is deterministic; the LLM may only summarise what came back."""
+    hits = T.search_knowledge(question, k)
+    if not hits.get("ok"):
+        return {"intent": "knowledge", "data": hits, "meta": {"llm": False},
+                "text": (f"Knowledge search is unavailable ({hits.get('reason')}).\n\n"
+                         "Set it up: drop PDFs in `./knowledge_uploads/`, run "
+                         "`make knowledge` to register them, approve each one in "
+                         "`vrr_agent.knowledge_registry`, then run `make knowledge` "
+                         "again to chunk → PII-redact → embed → store.")}
+    found = hits.get("hits") or []
+    if not found:
+        return {"intent": "knowledge", "data": hits, "meta": {"llm": False},
+                "text": "No matching chunks in the knowledge index yet."}
+
+    sources = "\n\n".join(f"[{h['file_name']} p.{h['page']}] (similarity {h['score']:.2f})\n"
+                          f"{h['text']}" for h in found)
+    if not (use_llm and llm.available()):
+        return {"intent": "knowledge", "data": hits, "meta": {"llm": False},
+                "text": "Closest passages in the knowledge index:\n\n" + sources}
+
+    msg = llm.chat([{"role": "system", "content": KNOWLEDGE_SYSTEM},
+                    {"role": "user", "content": f"Question: {question}\n\nEXCERPTS:\n{sources}"}])
+    text = (msg.get("content") or "").strip()
+    cited = ", ".join(sorted({f"{h['file_name']} p.{h['page']}" for h in found}))
+    return {"intent": "knowledge", "data": hits,
+            "meta": {"llm": True, "model": llm.pick_model(), "retrieved": len(found),
+                     "gate": "grounded in retrieved chunks (pgvector)"},
+            "text": f"{text}\n\n_Sources: {cited} — retrieved from "
+                    f"`vrr_agent.reservoir_knowledge` by pgvector cosine search._"}
+
+
 def general_answer(question: str, use_llm: bool = True) -> dict:
     """Domain Q&A that isn't about our tables: model knowledge + any ingested documents.
 
@@ -235,23 +280,15 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
                                                          bool(named_date)):
         return general_answer(question, use_llm)
 
+    if intent == "knowledge":
+        return _knowledge_answer(question, use_llm)
+
     if intent == "list" or not pid:
         rows = T.list_patterns()
         text = "\n".join(f"- **{r['pattern_name']}** ({r['pattern_id']}) — "
                          f"{r['n']} periods, latest {r['last_date']}" for r in rows)
         return {"intent": "list", "text": "Patterns in vrr_curated:\n" + text,
                 "data": {"patterns": rows}, "meta": {"llm": False}}
-
-    if intent == "knowledge":
-        hits = T.search_knowledge(question)
-        if not hits.get("ok"):
-            return {"intent": "knowledge", "data": hits, "meta": {"llm": False},
-                    "text": f"Knowledge search is unavailable ({hits.get('reason')}). "
-                            "Ingest PDFs with `make knowledge` and run Ollama for embeddings."}
-        lines = [f"- {h['file_name']} p.{h['page']} (score {h['score']:.2f}): "
-                 f"{h['text'][:240]}…" for h in hits["hits"]]
-        return {"intent": "knowledge", "text": "\n".join(lines) or "No matching chunks.",
-                "data": hits, "meta": {"llm": False}}
 
     if intent == "lineage":
         lin = T.vrr_lineage(pid, when) if when else None

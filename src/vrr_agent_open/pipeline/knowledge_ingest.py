@@ -42,6 +42,21 @@ def embed(text: str) -> list[float]:
     return r.json()["embedding"]
 
 
+def normalize_page(text: str) -> str:
+    """Undo PDF layout artefacts before chunking.
+
+    Extracted PDF text carries hard line wraps and run of spaces from the page layout;
+    left alone they leak into the chunks (and into anything quoting them). Collapse the
+    intra-paragraph wrapping while keeping blank lines, which `core.knowledge.chunk_text`
+    uses as paragraph boundaries.
+    """
+    import re
+    text = (text or "").replace("\r\n", "\n").replace("\xa0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)          # unwrap single newlines
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def register_new() -> int:
     """Step 1 — register new PDFs in the volume as pending_review."""
     n = 0
@@ -70,7 +85,7 @@ def ingest_approved() -> int:
             reader = PdfReader(os.path.join(UPLOAD_DIR, fname))
             kinds, seq = set(), 0
             for pageno, page in enumerate(reader.pages, start=1):
-                for chunk in kn.chunk_text(page.extract_text() or ""):
+                for chunk in kn.chunk_text(normalize_page(page.extract_text() or "")):
                     clean, k = kn.redact_pii(chunk)          # PII never reaches the DB
                     kinds.update(k)
                     cur.execute(
@@ -91,12 +106,13 @@ def ingest_approved() -> int:
 
 def search(query: str, k: int = 5) -> list[dict]:
     """Step 4 — the SEARCH_KNOWLEDGE tool: cosine nearest chunks (pgvector `<=>`)."""
+    vec = str(embed(query))              # embed ONCE, reuse for score + ordering
     with _conn() as c:
         with c.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
-                "SELECT file_name, page, text, 1 - (embedding <=> %s::vector) AS score "
-                "FROM vrr_agent.reservoir_knowledge ORDER BY embedding <=> %s::vector LIMIT %s",
-                (embed(query), embed(query), k))
+                "SELECT file_name, page, text, 1 - (embedding <=> %(v)s::vector) AS score "
+                "FROM vrr_agent.reservoir_knowledge "
+                "ORDER BY embedding <=> %(v)s::vector LIMIT %(k)s", {"v": vec, "k": k})
             return cur.fetchall()
 
 

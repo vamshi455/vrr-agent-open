@@ -91,6 +91,13 @@ st.sidebar.caption(
     + ("Phrasing is LLM-generated and gated; numbers stay tool-computed."
        if llm_up else "Answers are fully computed — no LLM needed."))
 st.sidebar.caption(f"Postgres: `{CFG.pg_dsn.split('@')[-1]}`")
+try:                        # knowledge index (pgvector) — empty until docs are ingested
+    kb = q("SELECT count(DISTINCT doc_id) docs, count(*) chunks "
+           "FROM vrr_agent.reservoir_knowledge")[0]
+    st.sidebar.caption(f"Knowledge index: {kb['docs']} doc(s), {kb['chunks']} chunks"
+                       + ("" if kb["chunks"] else " — run `make knowledge`"))
+except Exception:
+    pass
 
 ctx = T.pattern_context(pid)
 target = ctx["target_vrr"]
@@ -235,7 +242,7 @@ with tab_chat:
     quick = [f"Why is {ctx['pattern_name']}'s VRR {'high' if rows[-1]['vrr'] > target else 'low'} in {period:%B %Y}?",
              f"Is the {period:%B %Y} number actually correct?",
              f"How is {ctx['pattern_name']}'s VRR calculated?",
-             "What change do you recommend?"]
+             "What do the documents say about changing injection rates?"]
     asked = None
     for c, prompt in zip(cols, quick):
         if c.button(prompt, width="stretch"):
