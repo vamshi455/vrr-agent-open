@@ -27,6 +27,7 @@ import streamlit as st
 
 from vrr_agent_open.config import load_config
 from vrr_agent_open.core import approval as AP
+from vrr_agent_open.core import ids as IDS
 from vrr_agent_open.agent import analyst as AZ
 from vrr_agent_open.agent import chat as CH
 from vrr_agent_open.agent import llm as LLM
@@ -71,7 +72,9 @@ if not pats:
     st.stop()
 
 st.sidebar.title("🛢️ VRR — Open")
-label = {f"{p['pattern_name']} ({p['pattern_id']})": p["pattern_id"] for p in pats}
+# IDs are opaque 16-char hex keys — show a short form, keep the full one in provenance
+label = {f"{p['pattern_name']} ({IDS.short(p['pattern_id'])})": p["pattern_id"]
+         for p in sorted(pats, key=lambda r: r["pattern_name"] or "")}
 pid = label[st.sidebar.selectbox("Pattern", list(label))]
 rows = trend(pid)
 dates = [r["vrr_date"] for r in rows]
@@ -111,8 +114,53 @@ band = (mem.get("typical_low") or 0.9, mem.get("typical_high") or 1.1)
 window = [r for r in rows if d_from <= r["vrr_date"] <= d_to]
 df = pd.DataFrame(window)
 
-tab_report, tab_lineage, tab_chat, tab_approve = st.tabs(
-    ["📈 Report", "🔎 Lineage & audit", "💬 Analyst chat", "✅ Approval queue"])
+tab_portfolio, tab_report, tab_lineage, tab_chat, tab_approve = st.tabs(
+    ["🗺️ Portfolio", "📈 Report", "🔎 Lineage & audit", "💬 Analyst chat",
+     "✅ Approval queue"])
+
+# ------------------------------------------------------------- Portfolio ----
+with tab_portfolio:
+    st.subheader("Portfolio — where to look first")
+    st.caption("Every pattern's latest VRR against its target, ranked by absolute drift "
+               "(VRR_OVERVIEW over vrr_curated.pattern_vrr). Orange = built on "
+               "low-confidence PVT, so the number itself is suspect.")
+    assets = sorted({p.get("asset") for p in pats if p.get("asset")}) if pats else []
+    asset = st.selectbox("Asset", ["all assets", *assets])
+    ov = T.vrr_overview(None if asset == "all assets" else asset)
+    pf = pd.DataFrame(ov["patterns"])
+    if pf.empty:
+        st.info("No patterns for that asset.")
+    else:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Patterns", ov["n_patterns"])
+        m2.metric("Off target", len(ov["off_target"]))
+        m3.metric("Suspect inputs", int(pf["any_extrapolated"].sum()))
+        st.altair_chart(
+            alt.Chart(pf.head(20)).mark_bar().encode(
+                x=alt.X("drift:Q", title="|VRR − target|"),
+                y=alt.Y("pattern_name:N", sort="-x", title=None),
+                color=alt.condition(alt.datum.any_extrapolated,
+                                    alt.value("#ff7f0e"), alt.value("#1f77b4")),
+                tooltip=["pattern_name", "asset", alt.Tooltip("vrr:Q", format=".3f"),
+                         alt.Tooltip("target_vrr:Q", format=".2f"), "verdict",
+                         "any_extrapolated", "vrr_date:T"]).properties(height=420),
+            width="stretch")
+        show = pf[["pattern_name", "asset", "vrr_date", "vrr", "target_vrr", "verdict",
+                   "n_completions", "any_extrapolated", "response_factor", "id_pattern"]]
+        st.dataframe(show, width="stretch", hide_index=True)
+        st.caption("Pick a pattern in the sidebar to open it in the other tabs.")
+
+    with st.expander("Ingestion data quality (DATA_QUALITY)"):
+        dq = T.data_quality()
+        if dq.get("ok"):
+            st.success(f"All {len(dq['checks_run'])} checks clean — allocation sums ≤ 1, "
+                       "no orphan volumes, every pattern has pressure, every allocated "
+                       "completion has PVT.")
+        else:
+            st.warning(f"{dq['n_findings']} finding(s)")
+            for name, rows_ in (dq.get("findings") or {}).items():
+                st.markdown(f"**{name}** — {len(rows_)} row(s)")
+                st.dataframe(pd.DataFrame(rows_), width="stretch", hide_index=True)
 
 # ---------------------------------------------------------------- Report ----
 with tab_report:
@@ -122,6 +170,7 @@ with tab_report:
     prev = prev[-1] if prev else None
 
     st.subheader(f"{ctx['pattern_name']} — VRR {sel['vrr']:.3f} on {period:%b %Y}")
+    st.caption(f"id_pattern `{pid}`" + (f" · asset {ctx.get('asset')}" if ctx.get("asset") else ""))
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("VRR", f"{sel['vrr']:.3f}",
               f"{sel['vrr'] - prev['vrr']:+.3f} MoM" if prev else None)

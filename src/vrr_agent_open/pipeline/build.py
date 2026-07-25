@@ -24,6 +24,7 @@ import psycopg
 
 from ..config import load_config
 from ..core import physics
+from .dbio import chunked, copy_rows
 
 CFG = load_config()
 
@@ -72,15 +73,13 @@ SELECT f.id_pattern, p.pattern_name, d.id_completion, d.prod_date AS vrr_date, d
  ORDER BY f.id_pattern, d.prod_date, d.id_completion
 """
 
-_CONTRIB_INSERT = """
-INSERT INTO vrr_curated.completion_contrib
- (id_pattern, pattern_name, id_completion, vrr_date, amount_type, factor,
-  factor_effect_date, pattern_pressure_psia, oil_volume_bbl, water_volume_bbl,
-  gas_volume_kscf, water_inj_volume_bbl, gas_inj_volume_kscf, pvt_method, pvt_test_date,
-  bo, bw, bg, bg_inj, bw_inj, rs, rv, res_oil_volume_bbl, res_water_volume_bbl,
-  res_free_gas_volume_bbl, res_water_inj_volume_bbl, res_gas_inj_volume_bbl, run_id)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-"""
+_CONTRIB_COLUMNS = (
+    "id_pattern", "pattern_name", "id_completion", "vrr_date", "amount_type", "factor",
+    "factor_effect_date", "pattern_pressure_psia", "oil_volume_bbl", "water_volume_bbl",
+    "gas_volume_kscf", "water_inj_volume_bbl", "gas_inj_volume_kscf", "pvt_method",
+    "pvt_test_date", "bo", "bw", "bg", "bg_inj", "bw_inj", "rs", "rv",
+    "res_oil_volume_bbl", "res_water_volume_bbl", "res_free_gas_volume_bbl",
+    "res_water_inj_volume_bbl", "res_gas_inj_volume_bbl", "run_id")
 
 # --- PatternData / FinalData: aggregate + HAVING gate + weighted-average FVFs --
 # `grain` is the only difference between DAILY_PATTERN_VRR and MONTHLY_PATTERN_VRR, so
@@ -181,16 +180,20 @@ def _applicable_test(points: list[tuple], on_date) -> tuple:
 
 
 def build_contrib(conn, run_id: str) -> int:
-    """VolumeContext + CalculatedPVT → vrr_curated.completion_contrib (lineage layer)."""
+    """VolumeContext + CalculatedPVT → vrr_curated.completion_contrib (lineage layer).
+
+    Streams: the volume context is read through a server-side cursor in batches and the
+    contribution rows are COPY'd out on a second connection, so a 370k-row field never
+    materialises as one Python list.
+    """
     pvt = _pvt_by_completion(conn)
     cache: dict[tuple, tuple] = {}
-    rows: list[tuple] = []
 
-    with conn.cursor(name="volume_context") as cur:      # server-side: streams raw
-        cur.execute(_VOLUME_CONTEXT_SQL)
+    def rows_for(batch) -> list[tuple]:
+        out = []
         for (id_pattern, pattern_name, id_completion, vrr_date, uom, factor,
              factor_effect_date, pressure, oil, water, gas, water_inj, gas_inj,
-             amount_type) in cur:
+             amount_type) in batch:
             test_date, points = _applicable_test(pvt.get(id_completion, []), vrr_date)
             key = (id_completion, test_date, pressure)
             look = cache.get(key)
@@ -201,7 +204,7 @@ def build_contrib(conn, run_id: str) -> int:
                 factor=factor, oil=oil, water=water, gas=gas, water_inj=water_inj,
                 gas_inj=gas_inj, pvt=props, is_producer=(amount_type == "Production"),
                 gas_kscf_to_scf=GAS_MULT.get(uom or "OilField", 1000.0))
-            rows.append((
+            out.append((
                 id_pattern, pattern_name, id_completion, vrr_date, amount_type, factor,
                 factor_effect_date, pressure, oil, water, gas, water_inj, gas_inj,
                 look.method, test_date,
@@ -209,12 +212,19 @@ def build_contrib(conn, run_id: str) -> int:
                 props.get("bw_inj"), props.get("rs"), props.get("rv"),
                 terms.oil_res, terms.water_res, terms.free_gas_res,
                 terms.water_inj_res, terms.gas_inj_res, run_id))
+        return out
 
-    with conn.cursor() as cur:
-        cur.execute("TRUNCATE vrr_curated.completion_contrib")
-        cur.executemany(_CONTRIB_INSERT, rows)
-    conn.commit()
-    return len(rows)
+    written = 0
+    with psycopg.connect(CFG.pg_dsn) as writer:          # separate conn: COPY + TRUNCATE
+        with writer.cursor() as cur:
+            cur.execute("TRUNCATE vrr_curated.completion_contrib")
+        with conn.cursor(name="volume_context") as cur:   # server-side: streams raw
+            cur.execute(_VOLUME_CONTEXT_SQL)
+            for batch in chunked(cur):
+                written += copy_rows(writer, "vrr_curated.completion_contrib",
+                                     _CONTRIB_COLUMNS, rows_for(batch))
+        writer.commit()
+    return written
 
 
 def build_pattern_vrr(conn, run_id: str) -> dict[str, int]:

@@ -25,7 +25,8 @@ Reference tables (production: `{source_schema}` = `ENRICHMENT_DB.RMDE_<asset>`):
 
 | Production table | Columns | Role | Local table |
 |---|---|---|---|
-| `PATTERN` | `ID_PATTERN`, `PATTERN_NAME` | pattern registry | `vrr_raw.pattern` |
+| `PATTERN` | `ID_PATTERN`, `PATTERN_NAME` | pattern registry | `vrr_raw.pattern` (+ `asset`) |
+| completion master | `ID_COMPLETION`, name, UWI | completion registry | `vrr_raw.completion` |
 | `PATTERN_CONTRIBUTION_FACTOR` | `ID_COMPLETION`, `ID_PATTERN`, `FACTOR`, `EFFECT_DATE` | completion→pattern allocation (**time-windowed**) | `vrr_raw.pattern_contribution_factor` |
 | `PATTERN_PRESSURE` | `ID_PATTERN`, `DATE`, `PRESSURE` | pattern datum pressure (**time-windowed**) | `vrr_raw.pattern_pressure` |
 | `COMPLETION_PVT_CHARACTERISTICS` | `ID_COMPLETION`, `TEST_DATE`, `PRESSURE`, `OIL_FORMATION_VOLUME_FACTOR` (Bo), `GAS_FORMATION_VOLUME_FACTOR` (Bg), `WATER_FORMATION_VOLUME_FACTOR` (Bw), `INJECTED_GAS_FORMATION_VOLUME_FACTOR` (Bg_inj), `INJECTED_WATER_FORMATION_VOLUME_FACTOR` (Bw_inj), `SOLUTION_GAS_OIL_RATIO` (Rs), `VOLATIZED_OIL_GAS_RATIO` (Rv) | PVT, interpolated by pressure | `vrr_raw.completion_pvt_characteristics` (short column names, production names in comments) |
@@ -94,6 +95,25 @@ low-confidence PVT labels — the flag that vetoes valve recommendations), `run_
 `…_WATER_INJECTION_…`, `…_GAS_INJECTION_…`, `RES_CUMULATIVE_PRODUCTION_VOLUME_{u}`,
 `RES_CUMULATIVE_INJECTION_VOLUME_{u}`, and
 `CUMULATIVE_VRR_{BBLBBL|M3M3} = Σinj_res / Σprod_res` running per pattern by date.
+
+## 4a · Allocation is many-to-many and time-windowed
+
+The single most important structural point: `PATTERN_CONTRIBUTION_FACTOR` is an
+**allocation table**, not a membership list. One completion can feed several patterns at
+once, and its split can change over time. The local seed generates all four shapes so the
+join is genuinely exercised:
+
+| Shape | What it looks like | Why it matters |
+|---|---|---|
+| dedicated | one completion → one pattern, `FACTOR < 1` | partial participation is normal |
+| static split | producer → 2–3 patterns, FACTORs summing ≤ 1 | a well between injectors serves both |
+| split change | same completion, two windows with different FACTORs | re-allocation after a study |
+| migration | window closes on pattern A (`FACTOR = 0`), opens on B | well reassigned mid-life |
+
+Invariant the ingestion must hold (checked by the `DATA_QUALITY` tool): Σ FACTOR across
+patterns for a completion in any window ≤ 1. IDs are 16-char uppercase hex surrogate keys
+(`core/ids.py`), enforced by a `CHECK` constraint — nothing in the code may assume tidy
+identifiers like `PAT-001`.
 
 ## 5 · Why this is the agent's lineage backbone
 

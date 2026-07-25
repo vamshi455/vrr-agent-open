@@ -8,6 +8,8 @@ graph and the faithfulness gate are unchanged.
 
 The toolbelt, in the order an analyst usually needs it:
   LIST_PATTERNS      what patterns exist, latest VRR
+  VRR_OVERVIEW       portfolio ranked by drift from target (start here at field scale)
+  DATA_QUALITY       ingestion checks: allocation sums, orphan volumes, missing PVT
   VRR_TREND          the series behind the chart (date-filtered)
   VRR_GET            one period + provenance
   VRR_DECOMPOSE      ΔVRR attribution a→b (core.decompose, exact + additive)
@@ -57,9 +59,17 @@ def _execute(sql: str, params: dict) -> int:
 
 def _resolve(pattern: str) -> Optional[dict]:
     """Accept either a pattern_id ('PAT-001') or a name ('UNITY'), case-insensitive."""
-    r = _rows("SELECT id_pattern AS pattern_id, pattern_name FROM vrr_raw.pattern "
+    # Accept the pattern NAME, the full 16-char hex ID, or an ID prefix of >= 6 chars —
+    # IDs are opaque surrogate keys (core/ids.py) and nobody types them in full.
+    r = _rows("SELECT id_pattern AS pattern_id, pattern_name, asset FROM vrr_raw.pattern "
               "WHERE upper(id_pattern)=upper(%(p)s) OR upper(pattern_name)=upper(%(p)s)",
               {"p": pattern})
+    if not r and isinstance(pattern, str) and len(pattern.strip()) >= 6:
+        r = _rows("SELECT id_pattern AS pattern_id, pattern_name, asset FROM vrr_raw.pattern"
+                  " WHERE id_pattern LIKE upper(%(p)s) || '%%' LIMIT 2",
+                  {"p": pattern.strip()})
+        if len(r) > 1:                    # ambiguous prefix: refuse rather than guess
+            return None
     return r[0] if r else None
 
 
@@ -288,6 +298,101 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     }
 
 
+@tracing.trace("VRR_OVERVIEW", span_type="TOOL")
+def vrr_overview(asset: str | None = None, limit: int = 50) -> dict:
+    """Portfolio view: every pattern's latest VRR vs target, ranked by absolute drift.
+
+    The entry point for a 40-pattern field — "where should I look first?" — and the
+    backing for the app's Portfolio tab.
+    """
+    rows = _rows(
+        "WITH latest AS ("
+        "  SELECT DISTINCT ON (v.id_pattern) v.id_pattern, v.pattern_name, v.vrr_date,"
+        "         v.vrr_bblbbl AS vrr, v.res_production_volume_bbl AS prod_res_bbl,"
+        "         v.res_injection_volume_bbl AS inj_res_bbl, v.n_completions,"
+        "         v.any_extrapolated"
+        "    FROM vrr_curated.pattern_vrr v WHERE v.grain='monthly'"
+        "   ORDER BY v.id_pattern, v.vrr_date DESC)"
+        " SELECT l.*, p.asset, COALESCE(t.target_vrr, %(dt)s) AS target_vrr,"
+        "        m.typical_low, m.typical_high, m.response_factor,"
+        "        abs(l.vrr - COALESCE(t.target_vrr, %(dt)s)) AS drift"
+        "   FROM latest l"
+        "   LEFT JOIN vrr_raw.pattern p ON p.id_pattern = l.id_pattern"
+        "   LEFT JOIN vrr_raw.pattern_target t ON t.id_pattern = l.id_pattern"
+        "   LEFT JOIN vrr_agent.pattern_memory m ON m.id_pattern = l.id_pattern"
+        "  WHERE (%(a)s::text IS NULL OR p.asset = %(a)s)"
+        "  ORDER BY drift DESC LIMIT %(n)s",
+        {"a": asset, "n": limit, "dt": CFG.default_target_vrr})
+    for r in rows:
+        lo = r.get("typical_low") or 0.9
+        hi = r.get("typical_high") or 1.1
+        r["verdict"] = ("on target" if lo <= r["vrr"] <= hi else
+                        "OVER-replicating" if r["vrr"] > hi else "UNDER-replicating")
+    return {"n_patterns": len(rows), "asset": asset, "patterns": rows,
+            "off_target": [r for r in rows if r["verdict"] != "on target"],
+            "provenance": {"table": "vrr_curated.pattern_vrr (grain=monthly, latest period)"}}
+
+
+@tracing.trace("DATA_QUALITY", span_type="TOOL")
+def data_quality(pattern: str | None = None) -> dict:
+    """Ingestion-quality checks a real feed needs, as data rather than assumptions.
+
+    Each check returns offending keys, so "is the input data sane?" is answerable before
+    anyone argues about a VRR number.
+    """
+    pid = None
+    if pattern:
+        p = _resolve(pattern)
+        if not p:
+            return {"ok": False, "reason": f"unknown pattern '{pattern}'"}
+        pid = p["pattern_id"]
+    params = {"p": pid}
+    checks = {
+        # allocation can never exceed 100% of a completion on a given day
+        "factor_sum_over_one": (
+            "WITH w AS (SELECT id_completion, id_pattern, factor, effect_date,"
+            "   LEAD(effect_date) OVER (PARTITION BY id_completion, id_pattern"
+            "     ORDER BY effect_date) end_date"
+            "   FROM vrr_raw.pattern_contribution_factor)"
+            " SELECT id_completion, effect_date, round(sum(factor)::numeric,4) total"
+            "   FROM w WHERE (%(p)s::text IS NULL OR id_pattern = %(p)s)"
+            "  GROUP BY 1,2 HAVING sum(factor) > 1.0001 LIMIT 50"),
+        "volumes_without_allocation": (
+            "SELECT DISTINCT v.id_completion FROM vrr_raw.production_volumes_daily v"
+            " LEFT JOIN vrr_raw.pattern_contribution_factor f"
+            "   ON f.id_completion = v.id_completion"
+            " WHERE f.id_completion IS NULL AND %(p)s::text IS NULL LIMIT 50"),
+        "allocation_without_volumes": (
+            "SELECT DISTINCT f.id_completion, f.id_pattern"
+            " FROM vrr_raw.pattern_contribution_factor f"
+            " LEFT JOIN vrr_raw.production_volumes_daily v"
+            "   ON v.id_completion = f.id_completion"
+            " WHERE v.id_completion IS NULL"
+            "   AND (%(p)s::text IS NULL OR f.id_pattern = %(p)s) LIMIT 50"),
+        "patterns_without_pressure": (
+            "SELECT p.id_pattern, p.pattern_name FROM vrr_raw.pattern p"
+            " LEFT JOIN vrr_raw.pattern_pressure pr ON pr.id_pattern = p.id_pattern"
+            " WHERE pr.id_pattern IS NULL"
+            "   AND (%(p)s::text IS NULL OR p.id_pattern = %(p)s) LIMIT 50"),
+        "completions_without_pvt": (
+            "SELECT DISTINCT f.id_completion FROM vrr_raw.pattern_contribution_factor f"
+            " LEFT JOIN vrr_raw.completion_pvt_characteristics c"
+            "   ON c.id_completion = f.id_completion"
+            " WHERE c.id_completion IS NULL"
+            "   AND (%(p)s::text IS NULL OR f.id_pattern = %(p)s) LIMIT 50"),
+        "unregistered_completions": (
+            "SELECT DISTINCT v.id_completion FROM vrr_raw.production_volumes_daily v"
+            " LEFT JOIN vrr_raw.completion c ON c.id_completion = v.id_completion"
+            " WHERE c.id_completion IS NULL AND %(p)s::text IS NULL LIMIT 50"),
+    }
+    findings = {name: _rows(sql, params) for name, sql in checks.items()}
+    n = sum(len(v) for v in findings.values())
+    return {"ok": n == 0, "pattern_id": pid, "n_findings": n,
+            "findings": {k: v for k, v in findings.items() if v},
+            "checks_run": list(checks),
+            "clean_checks": [k for k, v in findings.items() if not v]}
+
+
 @tracing.trace("LIST_COMPLETIONS", span_type="TOOL")
 def list_completions(pattern: str, date: str | None = None) -> dict:
     """The completions making up a pattern, with each one's role and share of the VRR.
@@ -491,6 +596,10 @@ _DATE = {"date": {"type": "string", "description": "month start, YYYY-MM-DD"}}
 
 TOOL_SPECS: list[dict[str, Any]] = [
     _spec("LIST_PATTERNS", "List patterns and their latest VRR.", {}, []),
+    _spec("VRR_OVERVIEW", "Portfolio: every pattern's latest VRR vs target, ranked by drift.",
+          {"asset": {"type": "string"}}, []),
+    _spec("DATA_QUALITY", "Ingestion-quality checks over the raw layer (allocation, pressure, PVT).",
+          {**_PATTERN}, []),
     _spec("VRR_TREND", "VRR series for a pattern, optionally date-filtered.",
           {**_PATTERN, "date_from": {"type": "string"}, "date_to": {"type": "string"}},
           ["pattern"]),
@@ -519,6 +628,8 @@ TOOL_SPECS: list[dict[str, Any]] = [
 
 DISPATCH = {
     "LIST_PATTERNS": lambda a: {"patterns": list_patterns()},
+    "VRR_OVERVIEW": lambda a: vrr_overview(a.get("asset")),
+    "DATA_QUALITY": lambda a: data_quality(a.get("pattern")),
     "VRR_TREND": lambda a: vrr_trend(a["pattern"], a.get("date_from"), a.get("date_to")),
     "VRR_GET": lambda a: vrr_get(a["pattern"], a["date"]),
     "VRR_DECOMPOSE": lambda a: vrr_decompose(a["pattern"], a["date_a"], a["date_b"]),

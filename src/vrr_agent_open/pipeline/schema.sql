@@ -38,9 +38,21 @@ CREATE TABLE IF NOT EXISTS vrr_raw.production_volumes_daily (
 );
 
 -- ← {source_schema}.PATTERN — the pattern registry.
+-- IDs are 16-char uppercase hex, like the production surrogate keys (core/ids.py mints
+-- them); the CHECK keeps malformed keys out at the boundary instead of failing later.
 CREATE TABLE IF NOT EXISTS vrr_raw.pattern (
-  id_pattern text PRIMARY KEY,
-  pattern_name text
+  id_pattern text PRIMARY KEY CHECK (id_pattern ~ '^[0-9A-F]{16}$'),
+  pattern_name text,
+  asset text
+);
+
+-- Completion registry (a real ingestion carries one; volumes reference it).
+CREATE TABLE IF NOT EXISTS vrr_raw.completion (
+  id_completion text PRIMARY KEY CHECK (id_completion ~ '^[0-9A-F]{16}$'),
+  completion_name text,
+  uwi text,
+  asset text,
+  completion_type text                       -- producer | injector | dual (as designed)
 );
 
 -- ← {source_schema}.PATTERN_CONTRIBUTION_FACTOR — completion→pattern allocation.
@@ -77,6 +89,11 @@ CREATE TABLE IF NOT EXISTS vrr_raw.completion_pvt_characteristics (
   rv double precision,                       -- VOLATIZED_OIL_GAS_RATIO
   PRIMARY KEY (id_completion, test_date, pressure)
 );
+
+CREATE INDEX IF NOT EXISTS production_volumes_daily_date_idx
+  ON vrr_raw.production_volumes_daily (prod_date);
+CREATE INDEX IF NOT EXISTS pattern_contribution_factor_completion_idx
+  ON vrr_raw.pattern_contribution_factor (id_completion);
 
 -- Local addition (the production model carries targets elsewhere): per-pattern target.
 CREATE TABLE IF NOT EXISTS vrr_raw.pattern_target (
@@ -164,6 +181,9 @@ CREATE TABLE IF NOT EXISTS vrr_curated.pattern_vrr (
 );
 
 -- ← vrr_cumulative_calculator.sql — running totals per pattern by date.
+CREATE INDEX IF NOT EXISTS pattern_vrr_grain_date_idx
+  ON vrr_curated.pattern_vrr (grain, vrr_date);
+
 CREATE TABLE IF NOT EXISTS vrr_curated.pattern_vrr_cumulative (
   id_pattern text NOT NULL,
   pattern_name text,

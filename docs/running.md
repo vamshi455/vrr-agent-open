@@ -33,10 +33,15 @@ docker compose ps                 # confirm all three are "running"/healthy
 
 # Load synthetic VRR data: generates raw data and computes the curated tables
 # (completion_contrib → pattern_vrr_monthly) with core/physics. Postgres now has VRR.
-# Idempotent (truncates + reloads) and deterministic (fixed RNG seed). Seeds 3 patterns:
-#   UNITY    over-injecting — VRR drifts 1.00 → 1.33 by Apr-2026 (out_of_band + drift)
-#   HORIZON  healthy — stays inside the [0.90, 1.10] band (the negative control)
-#   MERIDIAN pressure falls below its PVT range from Jan-2026 → any_extrapolated
+# Idempotent (truncates + reloads), deterministic (fixed RNG seed), and loaded with COPY.
+# Defaults to 40 patterns × 225 completions × 36 months (~247k volume rows, ~300k
+# contribution rows, ~5 s). Scale it with VRR_SEED_PATTERNS / VRR_SEED_MONTHS.
+# IDs are 16-char uppercase hex, like real source keys; patterns also carry a name.
+# ~30% of producers feed 2–3 patterns (many-to-many allocation), including mid-life
+# split changes and one migrating wholly between patterns. Three scripted scenarios:
+#   UNITY    behaves for 2 years, then over-injects → VRR 1.00 → 1.36 (out_of_band + drift)
+#   HORIZON  healthy — stays inside the [0.90, 1.10] band for its whole life (control)
+#   MERIDIAN depletes past the bottom of its PVT range → any_extrapolated (suspect inputs)
 make seed
 
 # Rebuild ONLY vrr_curated from whatever is in vrr_raw (same core/physics path, new
