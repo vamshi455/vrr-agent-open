@@ -31,6 +31,7 @@ from vrr_agent_open.agent import analyst as AZ
 from vrr_agent_open.agent import chat as CH
 from vrr_agent_open.agent import llm as LLM
 from vrr_agent_open.agent import tools as T
+from vrr_agent_open.agent import tracing as TRACING
 
 CFG = load_config()
 st.set_page_config(page_title="VRR — Open", layout="wide", page_icon="🛢️")
@@ -91,6 +92,10 @@ st.sidebar.caption(
     + ("Phrasing is LLM-generated and gated; numbers stay tool-computed."
        if llm_up else "Answers are fully computed — no LLM needed."))
 st.sidebar.caption(f"Postgres: `{CFG.pg_dsn.split('@')[-1]}`")
+st.sidebar.caption(
+    f"[MLflow traces]({CFG.mlflow_uri}) — every question is a span tree "
+    "(tools · LLM · gate)" if TRACING.enabled() else
+    f"⚪ MLflow tracing off (no server at {CFG.mlflow_uri})")
 try:                        # knowledge index (pgvector) — empty until docs are ingested
     kb = q("SELECT count(DISTINCT doc_id) docs, count(*) chunks "
            "FROM vrr_agent.reservoir_knowledge")[0]

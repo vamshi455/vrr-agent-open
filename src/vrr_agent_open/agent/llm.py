@@ -12,6 +12,7 @@ from __future__ import annotations
 import httpx
 
 from ..config import load_config
+from . import tracing
 
 CFG = load_config()
 
@@ -49,6 +50,7 @@ def pick_model(preferred: str | None = None) -> str | None:
     return chat_models[0] if chat_models else None
 
 
+@tracing.trace("llm.chat", span_type="LLM")
 def chat(messages: list[dict], tools: list[dict] | None = None,
          model: str | None = None, temperature: float = 0.0,
          timeout: float = 180) -> dict:

@@ -141,6 +141,39 @@ Nothing else changes: the agentic loop picks it up automatically, errors are ret
 `{"error": ...}` rather than crashing the loop, and any number it returns is added to
 the whitelist the faithfulness gate checks the narration against.
 
+## Seeing what the agent did — MLflow traces
+
+Every question is recorded as a span tree, so you can see which tools ran, in what
+order, how long each took, what the LLM was sent, and what the gate decided.
+
+```bash
+# 5000 is taken by AirPlay Receiver on macOS — use 5001 (or disable the receiver)
+mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
+export MLFLOW_TRACKING_URI=http://localhost:5001
+make app        # or the docker-compose mlflow service on :5000
+```
+
+Open <http://localhost:5001> → experiment **vrr-agent-open** → *Traces*. The sidebar in
+the app links straight to it and shows whether tracing is live.
+
+Typical trees:
+
+```
+chat.respond (AGENT)  9.9 s          chat.respond (AGENT)  43 ms
+ ├ analyst.analyze (CHAIN)            ├ VRR_AUDIT (TOOL)
+ │  ├ VRR_AUDIT (TOOL)                └ VRR_GET   (TOOL)
+ │  ├ VRR_DECOMPOSE (TOOL)
+ │  └ RECOMMEND_CHANGE (TOOL)        agent.tool_loop (AGENT)   ← agentic mode
+ └ llm.chat (LLM)                     ├ llm.chat (LLM)
+                                      ├ tool_call (TOOL) ×N
+                                      └ faithfulness_gate (CHAIN)
+```
+
+`agent/tracing.py` probes the tracking server **once at import** (0.7 s) and falls back
+to a no-op decorator — so a missing MLflow install or a dead server costs nothing and
+prints nothing. Force it off with `VRR_TRACING=0`; rename the experiment with
+`VRR_MLFLOW_EXPERIMENT`.
+
 ## Lineage — what is actually stored
 
 `vrr_curated.completion_contrib` is the lineage layer: one row per

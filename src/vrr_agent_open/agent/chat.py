@@ -26,6 +26,7 @@ from ..core import faithfulness as FA
 from . import analyst as AZ
 from . import llm
 from . import tools as T
+from . import tracing
 
 CFG = load_config()
 
@@ -260,6 +261,7 @@ def general_answer(question: str, use_llm: bool = True) -> dict:
                      "grounded": bool(context)}}
 
 
+@tracing.trace("chat.respond", span_type="AGENT")
 def respond(question: str, *, pattern: str | None = None, date: str | None = None,
             use_llm: bool = True, agentic: bool = False) -> dict:
     """Answer one analyst question. Returns text + the raw tool payloads behind it.

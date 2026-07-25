@@ -23,6 +23,7 @@ from ..config import TARGET_BAND
 from ..core import anomaly as AN
 from ..core import decompose as DC
 from . import tools as T
+from . import tracing
 
 
 def _prev_month(date: str) -> str:
@@ -30,6 +31,7 @@ def _prev_month(date: str) -> str:
     return f"{y-1}-12-01" if m == 1 else f"{y}-{m-1:02d}-01"
 
 
+@tracing.trace("analyst.analyze", span_type="CHAIN")
 def analyze(pattern: str, date: str | None = None) -> dict:
     """Full case file for ``pattern`` at ``date`` (default: latest period)."""
     ctx = T.pattern_context(pattern)

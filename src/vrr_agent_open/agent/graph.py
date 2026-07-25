@@ -25,24 +25,9 @@ from ..config import load_config
 from ..core import faithfulness as FA
 from . import llm
 from . import tools as T
+from . import tracing
 
 CFG = load_config()
-
-# MLflow tracing is best-effort: the agent must run on a box where MLflow isn't
-# installed or the tracking server is down. A no-op decorator stands in.
-try:
-    import mlflow
-
-    mlflow.set_tracking_uri(CFG.mlflow_uri)
-except Exception:                                       # pragma: no cover - env dependent
-    class _NoTrace:
-        @staticmethod
-        def trace(*a, **k):
-            def deco(fn):
-                return fn
-            return deco
-
-    mlflow = _NoTrace()                                 # type: ignore[assignment]
 
 DOMAIN = """You are a reservoir engineer's assistant for VRR (Voidage Replacement Ratio)
 analysis on a waterflood.
@@ -119,7 +104,7 @@ def _numbers_in(obj, out: list[float]) -> list[float]:
     return out
 
 
-@mlflow.trace(span_type="AGENT")
+@tracing.trace("agent.tool_loop", span_type="AGENT")
 def run(question: str, *, pattern: str | None = None, date: str | None = None,
         max_steps: int = 6, model: str | None = None) -> dict:
     """LLM tool loop → gated answer. Returns text, the tool trace, and gate verdict."""
@@ -180,7 +165,7 @@ def _repair_prompt(verdict: dict) -> str:
             + " Rewrite it using only the tool results, without new tool calls.")
 
 
-@mlflow.trace(span_type="CHAIN")
+@tracing.trace("faithfulness_gate", span_type="CHAIN")
 def _gate(answer: str, decompose: dict | None,
           facts: list[float] | None = None) -> tuple[str, dict]:
     """Faithfulness gate (core.faithfulness). Narration may only name drivers the

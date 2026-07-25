@@ -32,6 +32,7 @@ from ..core import anomaly as AN
 from ..core import decompose as DC
 from ..core import physics
 from ..core import recommend as RE
+from . import tracing
 
 CFG = load_config()
 
@@ -69,6 +70,7 @@ def list_patterns() -> list[dict]:
                  "GROUP BY pattern_id ORDER BY pattern_id")
 
 
+@tracing.trace("VRR_TREND", span_type="TOOL")
 def vrr_trend(pattern: str, date_from: str | None = None,
               date_to: str | None = None) -> dict:
     """The pattern's VRR series (the data behind the chart), optionally date-filtered."""
@@ -88,6 +90,7 @@ def vrr_trend(pattern: str, date_from: str | None = None,
                                       "from": date_from, "to": date_to}}}
 
 
+@tracing.trace("VRR_GET", span_type="TOOL")
 def vrr_get(pattern: str, date: str) -> dict:
     p = _resolve(pattern)
     pid = p["pattern_id"] if p else pattern
@@ -112,6 +115,7 @@ def _term_totals(pattern_id: str, date: str) -> dict:
     return {k: (v or 0.0) for k, v in (r[0] if r else {}).items()}
 
 
+@tracing.trace("VRR_DECOMPOSE", span_type="TOOL")
 def vrr_decompose(pattern: str, date_a: str, date_b: str) -> dict:
     """ΔVRR attribution a→b via the exact log-mean (LMDI) math in ``core.decompose``.
 
@@ -132,6 +136,7 @@ def vrr_decompose(pattern: str, date_a: str, date_b: str) -> dict:
     return result
 
 
+@tracing.trace("VRR_LINEAGE", span_type="TOOL")
 def vrr_lineage(pattern: str, date: str) -> dict:
     """Full derivation of ONE monthly VRR: aggregate ← completions ← raw + PVT method.
 
@@ -182,6 +187,7 @@ def vrr_lineage(pattern: str, date: str) -> dict:
     }
 
 
+@tracing.trace("VRR_AUDIT", span_type="TOOL")
 def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     """Independently RECOMPUTE the month's VRR from raw tables and diff it vs stored.
 
@@ -242,6 +248,7 @@ def vrr_audit(pattern: str, date: str, tolerance: float = 1e-6) -> dict:
     }
 
 
+@tracing.trace("PATTERN_CONTEXT", span_type="TOOL")
 def pattern_context(pattern: str) -> dict:
     """Target, learned band/ρ, safety limits and prior adjustments for one pattern."""
     p = _resolve(pattern)
@@ -262,6 +269,7 @@ def pattern_context(pattern: str) -> dict:
     }
 
 
+@tracing.trace("DETECT_ANOMALIES", span_type="TOOL")
 def detect_anomalies(pattern: str) -> dict:
     """core.anomaly over the pattern's full monthly history (band from memory)."""
     ctx = pattern_context(pattern)
@@ -297,6 +305,7 @@ def _injector_states(pattern_id: str, date: str) -> list[RE.InjectorState]:
     return out
 
 
+@tracing.trace("RECOMMEND_CHANGE", span_type="TOOL")
 def recommend_change(pattern: str, date: str | None = None) -> dict:
     """core.recommend — bounded, ρ-calibrated injection change for one period."""
     ctx = pattern_context(pattern)
@@ -336,6 +345,7 @@ def find_precedent(pattern: str, driver: str | None = None,
     return {"found": bool(prec), **(prec or {})}
 
 
+@tracing.trace("SUBMIT_FOR_APPROVAL", span_type="TOOL")
 def submit_for_approval(pattern: str, date: str, *, draft: dict,
                         submitted_by: str = "agent") -> dict:
     """Write the draft into ``vrr_agent.action_queue`` at stage='draft'.
@@ -364,6 +374,7 @@ def submit_for_approval(pattern: str, date: str, *, draft: dict,
             "note": "Draft queued — advisory only until analyst → RM → site sign-off."}
 
 
+@tracing.trace("SEARCH_KNOWLEDGE", span_type="TOOL")
 def search_knowledge(query: str, k: int = 3) -> dict:
     """pgvector search over ingested reservoir docs. Needs a local embedding model."""
     try:
@@ -425,6 +436,7 @@ DISPATCH = {
 }
 
 
+@tracing.trace("tool_call", span_type="TOOL")
 def call_tool(name: str, args: dict) -> dict:
     fn = DISPATCH.get(name)
     if not fn:
