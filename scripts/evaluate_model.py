@@ -42,10 +42,18 @@ def main(limit: int = 50, eval_only: bool = False, judges: bool = True) -> None:
     scorers = get_scorers(include_judges=judges)
     print(f"scoring {len(traces)} trace(s)\n{describe(scorers)}")
 
+    # Attribute the scores: every trace carries the model_id of the agent version that
+    # produced it, so `mlflow.genai.evaluate` can tie this run to that version.
+    model_ids = {t.info.trace_metadata.get("mlflow.modelId") for t in traces
+                 if getattr(t.info, "trace_metadata", None)}
+    model_id = next((m for m in model_ids if m), None)
+
     with mlflow.start_run(run_name="vrr-eval") as run:
         mlflow.log_params({f"prompt.{k}": prompt_version(k) for k in PROMPTS})
-        result = mlflow.genai.evaluate(data=traces, scorers=scorers)
-    print(f"\nrun: {run.info.run_id}")
+        if model_id:
+            mlflow.log_param("model_id", model_id)
+        result = mlflow.genai.evaluate(data=traces, scorers=scorers, model_id=model_id)
+    print(f"\nrun: {run.info.run_id}  model_id: {model_id or 'unattributed'}")
     for metric, value in sorted((result.metrics or {}).items()):
         print(f"  {metric:<44} {value}")
     print(f"\nopen {CFG.mlflow_uri} → {EXPERIMENT} → Evaluations")

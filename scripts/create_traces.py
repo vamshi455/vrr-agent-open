@@ -26,6 +26,23 @@ from vrr_agent_open.prompts import PROMPTS, prompt_version             # noqa: E
 SME = AssessmentSource(source_type=AssessmentSourceType.HUMAN, source_id="reservoir-sme")
 
 
+MODEL_NAME = "vrr_agent_open"
+
+
+def _bind_active_model() -> str | None:
+    """Attach traces to the registered agent version, so a score has a subject.
+
+    Without this, traces float free of any version: you can see that a run scored 0.8 but
+    not what produced it. Silently skipped when the model has not been registered yet.
+    """
+    try:
+        model = mlflow.set_active_model(name=MODEL_NAME)
+        return getattr(model, "model_id", None)
+    except Exception as exc:
+        print(f"  (no active model bound: {exc}; run scripts/register_model.py)")
+        return None
+
+
 def main(use_llm: bool = True) -> None:
     if not tracing.enabled():
         print(f"! tracing is off ({tracing.status()}) — traces would not be recorded.")
@@ -33,6 +50,8 @@ def main(use_llm: bool = True) -> None:
         return
     print(tracing.status())
     print("prompt versions:", {k: prompt_version(k) for k in PROMPTS})
+    model_id = _bind_active_model()
+    print("active model_id:", model_id)
 
     pending: list[tuple[str, dict, str]] = []
     for entry in QUESTIONS:

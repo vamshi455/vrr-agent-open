@@ -1,5 +1,5 @@
 .PHONY: up down install test seed build audit knowledge queue register app agent
-        prompts traces eval judges lint
+        agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
 	docker compose up -d
@@ -27,6 +27,9 @@ knowledge:     ## register PDFs in ./knowledge_uploads, then ingest the APPROVED
 
 queue:         ## run the anomaly → action_queue job (drafts for human approval)
 	python -m vrr_agent_open.pipeline.anomaly_to_queue
+
+agent-model:   ## log + register the agent as an MLflow model (alias: candidate)
+	python scripts/register_model.py
 
 prompts:       ## push prompt templates to the MLflow Prompt Registry (alias: production)
 	python scripts/register_prompt.py
