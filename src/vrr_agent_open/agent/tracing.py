@@ -61,6 +61,37 @@ def status() -> str:
             else "⚪ tracing off (no MLflow server at " + CFG.mlflow_uri + ")")
 
 
+def retriever_span(name: str | None = None):
+    """Decorator for a retrieval function: records a RETRIEVER span with its documents.
+
+    MLflow's retrieval scorers read `mlflow.entities.Document` objects off spans typed
+    RETRIEVER. Our search returns dicts, so we translate here rather than contorting the
+    tool's own return shape — the tool stays convenient for the app, the trace stays
+    scoreable.
+    """
+    def deco(fn):
+        if not _enabled:
+            return fn
+
+        @wraps(fn)
+        def wrapper(*a, **kw):
+            from mlflow.entities import Document
+
+            with _mlflow.start_span(name=name or fn.__qualname__,
+                                    span_type="RETRIEVER") as span:
+                span.set_inputs({"query": str(a[0]) if a else kw.get("query", "")})
+                out = fn(*a, **kw)
+                hits = (out or {}).get("hits") or []
+                span.set_outputs([
+                    Document(page_content=h.get("text", ""),
+                             metadata={k: v for k, v in h.items() if k != "text"},
+                             id=f"{h.get('file_name')}#p{h.get('page')}")
+                    for h in hits])
+                return out
+        return wrapper
+    return deco
+
+
 def trace(name: str | None = None, span_type: str = "CHAIN"):
     """Decorator: record the call as a span when tracing is live, else pass through."""
     def deco(fn):
@@ -78,9 +109,18 @@ def trace(name: str | None = None, span_type: str = "CHAIN"):
                     pass
                 out = fn(*a, **kw)
                 try:
-                    span.set_outputs({"result": str(out)[:2000]})
+                    # Record the payload STRUCTURED and untruncated: a tool span is the
+                    # evidence a grounding check reads, and an answer's figures live in the
+                    # tail of large payloads (the old str()[:2000] silently cut them off,
+                    # which made every trace-based grounding score meaningless).
+                    span.set_outputs(out if isinstance(out, (dict, list, str, int, float,
+                                                             bool, type(None)))
+                                     else str(out))
                 except Exception:
-                    pass
+                    try:
+                        span.set_outputs({"repr": str(out)[:20000]})
+                    except Exception:
+                        pass
                 return out
         return wrapper
     return deco

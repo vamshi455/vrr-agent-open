@@ -112,11 +112,27 @@ def check_numbers(answer: str, allowed: list[float], *, tol: float = 0.005) -> d
     """Every decimal figure in the narration must match a tool-produced number.
 
     Catches the classic failure — a fluent model rounding 1.327 to "about 1.4" or
-    inventing a percentage. Integers and years are ignored (they're rarely VRR
+    inventing a percentage. Integers and years are ignored (they are rarely VRR
     quantities and produce noise); only decimals are checked.
+
+    Two allowances, because both are honest presentation rather than invention:
+
+    * **Sign** — the pattern deliberately excludes a leading ``+``/``-`` (it would also
+      swallow ranges and hyphens), so figures are compared by magnitude. Otherwise every
+      negative contribution — a production term that fell — reads as uncited.
+    * **Presentation rounding** — a figure printed to *n* decimals is accepted when some
+      tool value rounds to it at *n* decimals: ``0.56`` may be shown as ``0.6``, and
+      ``-0.025477`` as ``0.0255``. Inventing a value still fails, because no tool number
+      rounds to it: ``1.327`` never becomes ``1.4``.
     """
-    # Trailing "." is sentence punctuation, not part of the number — don't skip "1.4."
-    found = [float(m) for m in re.findall(r"(?<![\w.])\d+\.\d+(?!\d)", answer)]
-    bad = [f for f in found
-           if not any(abs(f - a) <= max(tol, abs(a) * tol) for a in allowed)]
-    return {"ok": not bad, "uncited": bad, "checked": found}
+    found = [(m, float(m)) for m in re.findall(r"(?<![\w.])\d+\.\d+(?!\d)", answer)]
+    magnitudes = [abs(a) for a in allowed]
+    bad = []
+    for text, value in found:
+        places = len(text.split(".")[1])
+        if any(abs(value - m) <= max(tol, abs(m) * tol) for m in magnitudes):
+            continue
+        if any(round(m, places) == value for m in magnitudes):
+            continue
+        bad.append(value)
+    return {"ok": not bad, "uncited": bad, "checked": [v for _, v in found]}

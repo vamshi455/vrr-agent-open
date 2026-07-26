@@ -49,3 +49,21 @@ def test_uncited_numbers_are_caught():
     assert check_numbers("VRR is 1.327 against a 1.0 target.", allowed)["ok"]
     bad = check_numbers("VRR is about 1.4.", allowed)
     assert not bad["ok"] and bad["uncited"] == [1.4]
+
+
+def test_negative_contributions_are_not_reported_as_uncited():
+    """A production term that FELL prints as -0.0255 while the fact is -0.025477; the
+    figure regex is deliberately unsigned, so comparison must be by magnitude."""
+    assert check_numbers("water production contributed -0.0255 VRR", [-0.025477])["ok"]
+
+
+def test_presentation_rounding_is_allowed():
+    assert check_numbers("0.6% of the move", [0.56])["ok"]          # 1 dp of 0.56
+    assert check_numbers("cumulative dVRR +0.36", [0.3552])["ok"]   # 2 dp of 0.3552
+
+
+def test_invention_is_still_caught_after_the_rounding_allowance():
+    bad = check_numbers("VRR is about 1.4.", [1.327, 1.0])
+    assert not bad["ok"] and bad["uncited"] == [1.4]
+    fabricated = check_numbers("oil averaged 908.39 STB/d", [6854.7, 227.02])
+    assert not fabricated["ok"] and fabricated["uncited"] == [908.39]

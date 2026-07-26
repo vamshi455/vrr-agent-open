@@ -66,10 +66,10 @@ def analyze(pattern: str, date: str | None = None) -> dict:
         str(r["vrr_date"]) == prior for r in history) else {
             "ok": False, "reason": "no prior period to compare against"}
 
-    # 3 — classify
-    anomalies = AN.detect_anomalies(
-        [r for r in history if str(r["vrr_date"]) <= date],
-        target_vrr=target, band=band)
+    # 3 — classify. Through the TOOL, not core.anomaly directly: every figure an analyst
+    #     reads must exist in a tool span, and the drift totals are computed here.
+    detected = T.detect_anomalies(pid, as_of=date)
+    anomalies = [AN.Anomaly(**a) for a in (detected.get("anomalies") or [])]
 
     # 4 — propose (only the deterministic engine may size a change, and only on
     #     inputs the audit cleared)
@@ -114,7 +114,8 @@ def analyze(pattern: str, date: str | None = None) -> dict:
         "period": period, "audit": audit, "audit_verdict": audit_verdict,
         "audit_route": route,
         "decompose": decomp,
-        "anomalies": [a.__dict__ for a in anomalies], "recommendation": rec,
+        "anomalies": [a.__dict__ for a in anomalies], "detected": detected,
+        "recommendation": rec,
         "precedent": precedent, "draft": draft, "memory": mem,
         "safety_limits": ctx["safety_limits"],
     }

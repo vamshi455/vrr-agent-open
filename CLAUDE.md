@@ -19,7 +19,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 
 ## Current status (2026-07-24)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval, decompose, faithfulness. **59 tests pass** (`pytest -q`, no stack needed).
+  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **88 tests pass** (`pytest -q`, no stack needed).
 - ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
   `vrr_agent` memory/limits/precedent) and `pipeline/build.py` (`vrr_raw` →
   `vrr_curated` via `core.physics`; `make build` rebuilds curated alone). Verified
@@ -44,6 +44,12 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
   `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (chart+date filter,
   lineage+audit, chat, role-gated approval writing `adjustment_history`).
+- ✅ **Evaluation harness** (see [docs/evaluation.md](docs/evaluation.md)): prompts extracted
+  + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set
+  (`data/evaluation/`), 6 deterministic trace scorers + 3 `make_judge` LLM judges
+  (`evaluation/`), `make traces` / `make eval`, RETRIEVER spans for the pgvector path,
+  pre-commit. First run found 2 routing gaps, truncated tool spans, 2 false-negative
+  classes in the gate, and a figure with no tool span behind it — all fixed.
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `governance/uc_register.py` — column population from information_schema for lineage
 

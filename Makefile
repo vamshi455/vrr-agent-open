@@ -1,4 +1,5 @@
-.PHONY: up down install test seed build audit knowledge queue register app agent lint
+.PHONY: up down install test seed build audit knowledge queue register app agent
+        prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
 	docker compose up -d
@@ -26,6 +27,18 @@ knowledge:     ## register PDFs in ./knowledge_uploads, then ingest the APPROVED
 
 queue:         ## run the anomaly → action_queue job (drafts for human approval)
 	python -m vrr_agent_open.pipeline.anomaly_to_queue
+
+prompts:       ## push prompt templates to the MLflow Prompt Registry (alias: production)
+	python scripts/register_prompt.py
+
+traces:        ## run the agent over data/evaluation questions, logging traces + expectations
+	python scripts/create_traces.py
+
+eval:          ## score recent traces (deterministic scorers + LLM judges if a model is up)
+	python scripts/evaluate_model.py --eval-only
+
+judges:        ## register the LLM judges server-side (add --start for automatic scoring)
+	python scripts/register_judge.py
 
 register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
 	python -m vrr_agent_open.governance.uc_register

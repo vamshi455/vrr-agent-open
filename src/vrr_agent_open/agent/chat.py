@@ -27,6 +27,7 @@ from . import analyst as AZ
 from . import llm
 from . import tools as T
 from . import tracing
+from ..prompts import (GENERAL_SYSTEM, KNOWLEDGE_SYSTEM, NARRATOR_SYSTEM)
 
 CFG = load_config()
 
@@ -50,6 +51,11 @@ INTENTS = (
                 "approval")),
     ("completions", ("completion", "wells", "well list", "which wells", "injectors",
                      "producers", "injector list")),
+    ("data_quality", ("data quality", "input data", "data sane", "is the data",
+                      "ingestion", "orphan", "allocation sum", "missing pvt")),
+    ("portfolio", ("furthest from target", "worst", "which patterns are", "portfolio",
+                   "rank", "ranked", "overview", "across the field", "off target",
+                   "needs attention", "look first")),
     ("list", ("list patterns", "which patterns", "what patterns", "all patterns")),
     ("explain", ("why", "explain", "driver", "cause", "high", "low", "increase", "decrease",
                  "drift", "what happened")),
@@ -110,21 +116,6 @@ def llm_available(timeout: float = 1.5) -> bool:
     return llm.available(timeout)
 
 
-NARRATOR_SYSTEM = (
-    "You are a reservoir-engineering analyst assistant. You are given a COMPUTED "
-    "analysis. Rewrite it as a clear answer to the analyst's question.\n"
-    "Rules you must not break:\n"
-    "- Never invent, round, or recompute a number — copy figures exactly as given.\n"
-    "- Never name a driver that is not in the decomposition, and never recommend an "
-    "action beyond the one computed.\n"
-    "- Watch the SIGNS. Each driver line reads '<term>: <change in res bbl> → "
-    "<effect on VRR>'. A NEGATIVE res bbl change means that term FELL. A production "
-    "term that falls RAISES VRR (less voidage to replace); a production term that rises "
-    "lowers VRR. Never write that a term increased when its res bbl change is negative.\n"
-    "Keep it under 200 words."
-)
-
-
 def _llm_rephrase(question: str, case: dict, feedback: str | None = None) -> str | None:
     """Ask the local model to phrase the computed case. ``feedback`` re-runs it with the
     gate's complaint attached — one repair attempt before we give up on the prose."""
@@ -173,25 +164,6 @@ def _gated_answer(question: str, case: dict) -> tuple[str, dict]:
 
 
 # ---- the router -------------------------------------------------------------
-
-GENERAL_SYSTEM = (
-    "You are a reservoir engineer explaining VRR (voidage replacement ratio) concepts to "
-    "a colleague. Answer the question directly and concisely (under 200 words). Use the "
-    "definitions in the primer below as authoritative — do not contradict them. You are "
-    "answering from general reservoir-engineering knowledge, NOT from this site's data — "
-    "if the question would need field data to answer properly, say so and name the tool "
-    "or table that would provide it (vrr_curated.pattern_vrr for VRR history, "
-    "vrr_curated.completion_contrib for the per-completion lineage). Never invent "
-    "numbers about this field."
-)
-
-
-KNOWLEDGE_SYSTEM = (
-    "Answer the question USING ONLY the document excerpts provided. Quote or paraphrase "
-    "them; cite the file name and page for each claim. If the excerpts do not contain "
-    "the answer, say so plainly — do not fall back on your own knowledge, and never "
-    "state a number that is not in the excerpts."
-)
 
 
 def _knowledge_answer(question: str, use_llm: bool = True, k: int = 4) -> dict:
@@ -250,7 +222,7 @@ def general_answer(question: str, use_llm: bool = True) -> dict:
 
     # Ground the model in the project's own VRR primer so a small local model can't
     # drift on the basics (e.g. inverting the ratio).
-    from .graph import DOMAIN
+    from ..prompts import DOMAIN
     msg = llm.chat([{"role": "system", "content": GENERAL_SYSTEM + "\n\nPRIMER\n" + DOMAIN},
                     {"role": "user", "content": question + context}])
     text = (msg.get("content") or "").strip()
@@ -286,6 +258,34 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
 
     if intent == "knowledge":
         return _knowledge_answer(question, use_llm)
+
+    if intent == "portfolio":
+        ov = T.vrr_overview()
+        rows = ov["patterns"][:10]
+        L = [f"**{ov['n_patterns']} patterns · {len(ov['off_target'])} off target** "
+             "(ranked by |VRR − target|)", "",
+             "| pattern | asset | VRR | target | verdict | inputs |",
+             "|---|---|---|---|---|---|"]
+        for r in rows:
+            L.append(f"| {r['pattern_name']} | {r.get('asset') or '—'} | {r['vrr']:.3f} | "
+                     f"{r['target_vrr']:.2f} | {r['verdict']} | "
+                     f"{'⚠️ suspect' if r['any_extrapolated'] else 'ok'} |")
+        L += ["", f"_Source: `{ov['provenance']['table']}`. Suspect-input patterns must be "
+                  "audited before any valve change is considered._"]
+        return {"intent": "portfolio", "text": "\n".join(L), "data": ov,
+                "meta": {"llm": False}}
+
+    if intent == "data_quality":
+        dq = T.data_quality(pid)
+        if dq.get("ok"):
+            text = (f"Ingestion checks all clean ({len(dq['checks_run'])} run): "
+                    + ", ".join(f"`{c}`" for c in dq["clean_checks"]) + ".")
+        else:
+            lines = [f"**{dq['n_findings']} data-quality finding(s)**", ""]
+            for name, rows_ in (dq.get("findings") or {}).items():
+                lines.append(f"- `{name}`: {len(rows_)} row(s) — e.g. {rows_[0]}")
+            text = "\n".join(lines)
+        return {"intent": "data_quality", "text": text, "data": dq, "meta": {"llm": False}}
 
     if intent == "list" or not pid:
         rows = T.list_patterns()

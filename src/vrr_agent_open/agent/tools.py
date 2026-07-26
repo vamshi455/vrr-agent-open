@@ -504,19 +504,26 @@ def pattern_context(pattern: str) -> dict:
 
 
 @tracing.trace("DETECT_ANOMALIES", span_type="TOOL")
-def detect_anomalies(pattern: str) -> dict:
-    """core.anomaly over the pattern's full monthly history (band from memory)."""
+def detect_anomalies(pattern: str, as_of: str | None = None) -> dict:
+    """core.anomaly over the pattern's monthly history (band from memory).
+
+    ``as_of`` truncates the history, so a period can be assessed as it looked then — and
+    so the analyst can reach these rules THROUGH a traced tool rather than calling
+    ``core.anomaly`` directly (a figure with no tool span behind it is unauditable).
+    """
     ctx = pattern_context(pattern)
     if not ctx.get("found"):
         return {"ok": False, "reason": f"unknown pattern '{pattern}'"}
     hist = vrr_trend(ctx["pattern_id"])["rows"]
+    if as_of:
+        hist = [r for r in hist if str(r["vrr_date"]) <= str(as_of)]
     mem = ctx.get("memory") or {}
     band = (mem.get("typical_low"), mem.get("typical_high"))
     found = AN.detect_anomalies(hist, target_vrr=ctx["target_vrr"],
                                 band=band if all(band) else None)
     return {"ok": True, "pattern_id": ctx["pattern_id"],
             "pattern_name": ctx["pattern_name"], "target_vrr": ctx["target_vrr"],
-            "band": band if all(band) else None,
+            "band": band if all(band) else None, "as_of": as_of,
             "anomalies": [a.__dict__ for a in found]}
 
 
@@ -609,9 +616,14 @@ def submit_for_approval(pattern: str, date: str, *, draft: dict,
             "note": "Draft queued — advisory only until analyst → RM → site sign-off."}
 
 
-@tracing.trace("SEARCH_KNOWLEDGE", span_type="TOOL")
+@tracing.retriever_span("SEARCH_KNOWLEDGE")
 def search_knowledge(query: str, k: int = 3) -> dict:
-    """pgvector search over ingested reservoir docs. Needs a local embedding model."""
+    """pgvector search over ingested reservoir docs. Needs a local embedding model.
+
+    Traced as a RETRIEVER span carrying `mlflow.entities.Document`s, which is what makes
+    the retrieval scorers (groundedness / relevance / sufficiency) able to score this
+    system at all — a TOOL span is invisible to them.
+    """
     try:
         from ..pipeline.knowledge_ingest import search
         return {"ok": True, "hits": search(query, k)}
@@ -655,7 +667,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     _spec("PATTERN_CONTEXT", "Target, learned band/rho, safety limits, adjustment history.",
           _PATTERN, ["pattern"]),
     _spec("DETECT_ANOMALIES", "Run the deterministic anomaly rules over a pattern.",
-          _PATTERN, ["pattern"]),
+          {**_PATTERN, "as_of": {"type": "string"}}, ["pattern"]),
     _spec("RECOMMEND_CHANGE", "Compute a bounded injection change to steer VRR to target.",
           {**_PATTERN, **_DATE}, ["pattern"]),
     _spec("FIND_PRECEDENT", "Most recent executed adjustment matching a driver.",
@@ -676,7 +688,7 @@ DISPATCH = {
     "LIST_COMPLETIONS": lambda a: list_completions(a["pattern"], a.get("date")),
     "INPUT_AUDIT": lambda a: input_audit(a.get("pattern"), a.get("verdict")),
     "PATTERN_CONTEXT": lambda a: pattern_context(a["pattern"]),
-    "DETECT_ANOMALIES": lambda a: detect_anomalies(a["pattern"]),
+    "DETECT_ANOMALIES": lambda a: detect_anomalies(a["pattern"], a.get("as_of")),
     "RECOMMEND_CHANGE": lambda a: recommend_change(a["pattern"], a.get("date")),
     "FIND_PRECEDENT": lambda a: find_precedent(a["pattern"], a.get("driver")),
     "SEARCH_KNOWLEDGE": lambda a: search_knowledge(a["query"]),
