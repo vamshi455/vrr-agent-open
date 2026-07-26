@@ -5,6 +5,9 @@ whether today's build is better or worse than last week's. This is the MLflow Ge
 workflow — prompt registry, ground-truth expectations, deterministic scorers and LLM
 judges over traces — wired to the local stack.
 
+New here? [evaluation-walkthrough.md](evaluation-walkthrough.md) is the plain-English,
+command-by-command version of this document, including how to read each score.
+
 ```
 scripts/register_prompt.py    prompts/templates.py  →  MLflow Prompt Registry (alias: production)
 scripts/create_traces.py      data/evaluation/      →  one trace + expectations per question
@@ -17,6 +20,118 @@ make prompts     # version the four prompts, alias them "production"
 make traces      # run the question set, attach ground truth
 make eval        # score: deterministic scorers + judges if a model is reachable
 ```
+
+## The flow, end to end
+
+Three commands, and nothing hidden between them: the only thing `make traces` hands to
+`make eval` is **traces in MLflow**. That is deliberate — evaluation reads the same
+recording of the agent that a human debugging a bad answer would read, so a score can
+never be computed from evidence the analyst can't also see.
+
+```mermaid
+flowchart LR
+    subgraph authored["Authored by a human, lives in git"]
+        P["prompts/templates.py<br/>4 prompt templates"]
+        Q["data/evaluation/vrr_questions.py<br/>10 questions + expectations"]
+        S["evaluation/custom_scorers.py<br/>6 deterministic scorers"]
+        J["evaluation/custom_judges.py<br/>3 make_judge judges"]
+    end
+
+    P -->|make prompts| PR[("MLflow Prompt Registry<br/>alias: production")]
+    Q -->|make traces| CT["scripts/create_traces.py"]
+    CT -->|one trace per question| TR[("MLflow traces<br/>tag: eval_case")]
+    CT -->|log_expectation| TR
+    PR -.->|version hash stamped on the run| EV
+    TR -->|make eval| EV["scripts/evaluate_model.py"]
+    S --> EV
+    J --> EV
+    EV --> RUN[("evaluation run 'vrr-eval'<br/>per-trace scores + aggregates")]
+```
+
+### Stage 1 — `make traces`: record the agent answering, then staple the truth on
+
+`create_traces.py` refuses to run if tracing is off, because a run with no traces looks
+like a pass. Each question is wrapped in an `EVALUATOR` span so the question, the case id
+and the final answer are all inside the same trace as the tool calls that produced it.
+
+```mermaid
+flowchart TD
+    A["tracing.enabled()?"] -->|no| A0["stop — 'traces would not be recorded'"]
+    A -->|yes| B["set_active_model('vrr_agent_open')<br/>→ model_id, so a score has a subject"]
+    B --> C{"for each of the 10 questions"}
+    C --> D["mlflow.start_span('eval:&lt;id&gt;', EVALUATOR)<br/>inputs: question + case"]
+    D --> E["chat.respond(question, pattern, date)"]
+
+    subgraph agent["inside the agent — the spans a scorer will read"]
+        E --> F["detect_intent → route"]
+        F --> G["deterministic tools<br/>TOOL spans: VRR_AUDIT, VRR_DECOMPOSE, …"]
+        F --> H["SEARCH_KNOWLEDGE<br/>RETRIEVER span + Documents"]
+        G --> I["core.faithfulness gate<br/>pass / repair once / REJECT"]
+        H --> I
+    end
+
+    I --> J["span.set_outputs(text, intent)"]
+    J --> C
+    C -->|all done| K["flush_trace_async_logging()<br/>spans export async — attach truth AFTER"]
+    K --> L["log_expectation × N per trace<br/>source = HUMAN 'reservoir-sme'"]
+    L --> M["set_trace_tag(trace_id, 'eval_case', id)"]
+```
+
+The expectations are the authored fields of the question entry — `expected_intent`,
+`expected_tools`, `forbidden_tools`, `expected_verdict`, `must_mention`,
+`must_not_mention` — logged against a **human** assessment source. The `eval_case` tag is
+what `--eval-only` filters on later, and is the reason the Makefile rule exists.
+
+### Stage 2 — `make eval`: select traces, assemble scorers, score
+
+```mermaid
+flowchart TD
+    A["mlflow.search_traces(experiment)<br/>filter: tags.eval_case != ''"] --> B{"traces found?"}
+    B -->|no| B0["stop — 'no traces to score'"]
+    B -->|yes| C["get_scorers(include_judges)"]
+    C --> D["6 deterministic scorers<br/>always"]
+    C --> E{"llm.available()?"}
+    E -->|yes| F["+ 3 make_judge judges"]
+    E -->|no| G["judges skipped — run still meaningful"]
+    D --> H
+    F --> H
+    G --> H["model_id ← trace_metadata['mlflow.modelId']"]
+    H --> I["start_run('vrr-eval')<br/>log_params: prompt version hashes + model_id"]
+    I --> J["mlflow.genai.evaluate(data=traces, scorers, model_id)"]
+    J --> K["per-trace assessments + */mean aggregates"]
+```
+
+**This is why `make traces` must immediately precede `make eval`.** The filter selects by
+tag, not by time; running `evaluate_model.py` bare drops the filter and scores the last 50
+traces of *any* origin, which shifts every `*/mean` denominator and makes two `vrr-eval`
+runs incomparable.
+
+### What a scorer actually reads
+
+Every deterministic scorer is a pure function of the span tree — no LLM, no network. A
+real trace from the question set, and the facts each scorer extracts from it:
+
+```
+eval:explain_out_of_band                EVALUATOR   ─┐
+└─ chat.respond                         AGENT        │ _final_answer() = root span's
+   ├─ PATTERN_CONTEXT                   TOOL         │ output text — what the analyst read
+   ├─ VRR_TREND                         TOOL         │
+   ├─ VRR_AUDIT                         TOOL  ←──────┤ audit_before_advice: index of the
+   ├─ VRR_DECOMPOSE                     TOOL         │ first AUDIT_TOOL must precede the
+   ├─ RECOMMEND_CHANGE                  TOOL  ←──────┤ first ADVICE_TOOL, by start time
+   └─ llm.chat                          LLM          │
+                                                     │ numbers_grounded: every -?\d+\.\d+
+eval:knowledge_lookup                   EVALUATOR    │ in the answer must appear in some
+└─ chat.respond                         AGENT        │ TOOL or RETRIEVER span payload
+   └─ SEARCH_KNOWLEDGE                  RETRIEVER ←──┘ (RETRIEVER counts — that's what
+        outputs: 4 × Document{page_content, metadata{file_name, page, score}}   makes RAG
+                                                                               scoreable)
+```
+
+`gate_passed` scans every span for a recorded gate rejection; `no_advice_on_artifact`
+looks for a `DATA_ARTIFACT` verdict anywhere in the tree and then checks the answer
+proposes nothing; `tools_used` and `latency_ms` are counts off the same structure. None of
+them ask a model anything, which is why they are the tiebreaker when a judge disagrees.
 
 ## Two kinds of scorer, and why the split matters
 

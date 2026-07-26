@@ -44,7 +44,8 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
   `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (chart+date filter,
   lineage+audit, chat, role-gated approval writing `adjustment_history`).
-- ✅ **Evaluation harness** (see [docs/evaluation.md](docs/evaluation.md)): prompts extracted
+- ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
+  step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set
   (`data/evaluation/`), 6 deterministic trace scorers + 3 `make_judge` LLM judges
   (`evaluation/`), `make traces` / `make eval`, RETRIEVER spans for the pgvector path,
@@ -56,6 +57,14 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 ## How to run
 See [docs/running.md](docs/running.md) (every command commented). Fast path:
 `pip install -e ".[dev]" && pytest -q` (logic only, no Docker). LLM chat: see [docs/agent-flow.md](docs/agent-flow.md).
+
+**Evaluation rule** — always `make traces` immediately before `make eval`, and only ever
+via the Makefile (`make eval` = `--eval-only`, which filters `tags.eval_case != ''`).
+Running `evaluate_model.py` bare scores the last 50 traces of *any* origin (Streamlit,
+`make agent`, older sets), so the run's `*/mean` denominators shift and two `vrr-eval` runs
+stop being comparable; it also picks `model_id` from an arbitrary member of the trace set
+when versions are mixed. Judges need Ollama up; `--no-judges` skips them (seconds, not
+minutes). Where a judge and a deterministic scorer disagree, the deterministic one is right.
 
 ## Key decision — "Unity Catalog on Postgres" feasibility
 Feasible as a **catalog-of-record**, NOT query enforcement. UC OSS governs registered
