@@ -1,16 +1,21 @@
 # Analyst workflow — from a suspicious number to an approved valve change
 
-How the four app tabs, the agent, and the deterministic core fit together. Companion
-to [design.md](design.md) (why) and [running.md](running.md) (commands).
+How the app tabs, the always-present chat, the agent, and the deterministic core fit
+together. Companion to [design.md](design.md) (why) and [running.md](running.md)
+(commands).
 
 ## The loop
 
 ```
       ┌──────────── Streamlit workbench (make app) ─────────────┐
-      │ 📈 Report      trend + band + ΔVRR attribution          │
+      │ 🗺️ Portfolio   every pattern vs target, ranked by drift  │
+      │ 📈 Report      trend + band + ΔVRR attribution + draft   │
       │ 🔎 Lineage     raw → PVT → contrib → monthly + RECOMPUTE │
-      │ 💬 Chat        ask the agent (tools compute, LLM phrases)│
       │ ✅ Approval    draft → analyst → RM → site → executed    │
+      ├─────────────────────────────────────────────────────────┤
+      │ 💬 Chat — under every tab, input pinned to the window    │
+      │    bottom; carries the sidebar's pattern + period, so it │
+      │    asks about whatever you are looking at               │
       └────────────────────────┬────────────────────────────────┘
                                │ every number
       ┌────────────────────────▼────────────────────────────────┐
@@ -53,7 +58,7 @@ overrides the choice; `agent.llm.pick_model()` falls back to whatever chat model
 actually pulled, so any local model works. `VRR_LLM_BASE_URL` points at any other
 OpenAI-compatible endpoint.
 
-Two modes, toggled in the chat tab:
+Two modes, toggled beside the chat header:
 
 | Mode | Who calls the tools | Speed (local 7B) | Use when |
 |---|---|---|---|
@@ -111,7 +116,7 @@ make knowledge                                   # 3. chunk → PII-redact → e
 
 Step 2 is deliberately manual: only a human decides a document is VRR-relevant and fit
 to embed (guardrail in [knowledge-flow.md](knowledge-flow.md)). PII is redacted before
-embedding, so it never reaches the index. Then ask in the chat tab: *"What do the
+embedding, so it never reaches the index. Then ask in the chat: *"What do the
 documents say about changing injection rates?"*
 
 Requires the `vector` extension in Postgres (the compose image has it; a bare local

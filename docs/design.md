@@ -140,7 +140,7 @@ a config change, not a code change.
 
 ## Status
 Deterministic core, seed + builder, agent (tools · analyst · chat · gate), pgvector RAG,
-and the 4-tab workbench are all implemented and verified against a live Postgres; 59
+and the workbench (4 tabs + an always-present analyst chat) are all implemented and verified against a live Postgres; 59
 tests pass off-DB. Remaining: outcome write-back into ρ, UC column-level registration,
 and a run of the whole path on the docker-compose stack (so far verified on a local
 Postgres 18 + pgvector 0.8.5 cluster).

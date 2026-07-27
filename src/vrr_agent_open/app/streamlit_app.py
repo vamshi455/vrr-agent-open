@@ -1,17 +1,21 @@
 """VRR review + approval workbench (OSS) — Streamlit over PostgreSQL.
 
-Four tabs, one workflow: look at the trend → prove the number is right → ask the
-agent why → send a bounded valve change up the approval chain.
+One workflow: look at the trend → prove the number is right → ask the agent why →
+send a bounded valve change up the approval chain.
 
+  🗺️ Portfolio     every pattern's latest VRR vs target, ranked by drift
   📈 Report        per-pattern VRR chart (date-filtered) + target band + anomaly
-                   markers, ΔVRR attribution for the selected period
+                   markers, ΔVRR attribution, and the draft valve change for approval
   🔎 Lineage       how THIS number was built — raw tables → PVT method → per-completion
                    terms → monthly aggregate, plus an independent recompute (VRR_AUDIT)
-  💬 Analyst chat  ask the local agent; answers are computed by deterministic tools and
-                   only *phrased* by the LLM (behind the faithfulness gate). One click
-                   submits the computed recommendation for approval.
   ✅ Approval      role-gated draft → analyst → RM → site → executed; executing writes
                    vrr_agent.adjustment_history, closing the ρ-learning loop.
+
+💬 The analyst chat is NOT a tab — it lives below the tab strip and its input is pinned
+to the bottom of the window, so it is reachable from whichever tab is open. Chat is how
+you interrogate whatever you are currently looking at; making it a tab meant leaving the
+chart to ask about the chart. Answers are computed by deterministic tools and only
+*phrased* by the LLM, behind the faithfulness gate.
 
 Every number rendered here comes from `agent.tools` / `core.*` — the app does no
 arithmetic of its own. Run: `make app`.
@@ -114,9 +118,8 @@ band = (mem.get("typical_low") or 0.9, mem.get("typical_high") or 1.1)
 window = [r for r in rows if d_from <= r["vrr_date"] <= d_to]
 df = pd.DataFrame(window)
 
-tab_portfolio, tab_report, tab_lineage, tab_chat, tab_approve = st.tabs(
-    ["🗺️ Portfolio", "📈 Report", "🔎 Lineage & audit", "💬 Analyst chat",
-     "✅ Approval queue"])
+tab_portfolio, tab_report, tab_lineage, tab_approve = st.tabs(
+    ["🗺️ Portfolio", "📈 Report", "🔎 Lineage & audit", "✅ Approval queue"])
 
 # ------------------------------------------------------------- Portfolio ----
 with tab_portfolio:
@@ -249,6 +252,28 @@ with tab_report:
     with st.expander("Monthly rows (vrr_curated.pattern_vrr, grain=monthly)"):
         st.dataframe(df, width="stretch", hide_index=True)
 
+    # The draft belongs with the period it was computed from, not with the chat that
+    # used to host it: the analysis above IS the evidence for this recommendation.
+    st.divider()
+    st.markdown("##### Draft a valve change for approval")
+    case = AZ.analyze(pid, str(period))
+    if not case.get("ok"):
+        st.info(case.get("reason"))
+    else:
+        st.markdown(case["narrative"])
+        if case.get("draft"):
+            investigate = case["draft"]["action_type"] == "investigate_inputs"
+            if st.button("📤 Submit to approval queue (stage: draft → analyst)",
+                         type="primary"):
+                res = T.submit_for_approval(pid, str(period), draft=case["draft"],
+                                            submitted_by=user)
+                st.success(f"Queued {res['action_id']} — next approver: {res['next_approver']}.")
+            if investigate:
+                st.caption("This draft is an *investigate inputs* item (suspect PVT), not a "
+                           "valve change — it still routes through the same approval chain.")
+        else:
+            st.info("No anomaly fired for this period — nothing to draft.")
+
 # --------------------------------------------------------------- Lineage ----
 with tab_lineage:
     st.subheader(f"How {ctx['pattern_name']}'s {period:%b %Y} VRR was computed")
@@ -290,84 +315,6 @@ with tab_lineage:
                             "vrr": lin["recomputed_from_terms"]["vrr"]}]))
     st.caption("Unity Catalog OSS registers these tables as the catalog-of-record, so this "
                "chain is also visible as table-level lineage (`make register`).")
-
-# ------------------------------------------------------------------ Chat ----
-with tab_chat:
-    st.subheader("Ask the agent")
-    st.caption("Numbers come from deterministic tools over Postgres. The local LLM, when "
-               "running, only rephrases the computed analysis — and its answer is discarded "
-               "if the faithfulness gate rejects it.")
-    if "chat" not in st.session_state:
-        st.session_state.chat = []
-
-    agentic = st.toggle(
-        "Let the model query the tables itself (agentic tool loop — slower)",
-        value=False, disabled=not llm_up,
-        help="Off: the deterministic pipeline runs the tools and the model only rewrites "
-             "the result (~10 s). On: the model chooses which tools/tables to query "
-             "(~1–2 min on a local 7B) — its answer is still gated, and rejected "
-             "narration falls back to the computed one.")
-
-    cols = st.columns(4)
-    quick = [f"Why is {ctx['pattern_name']}'s VRR {'high' if rows[-1]['vrr'] > target else 'low'} in {period:%B %Y}?",
-             f"Is the {period:%B %Y} number actually correct?",
-             f"How is {ctx['pattern_name']}'s VRR calculated?",
-             "What do the documents say about changing injection rates?"]
-    asked = None
-    for c, prompt in zip(cols, quick):
-        if c.button(prompt, width="stretch"):
-            asked = prompt
-    typed = st.chat_input(f"Ask about {ctx['pattern_name']} {period:%b %Y}…")
-    asked = asked or typed
-
-    for m in st.session_state.chat:
-        with st.chat_message(m["role"]):
-            st.markdown(m["text"])
-            if m.get("meta"):
-                st.caption(m["meta"])
-
-    if asked:
-        st.session_state.chat.append({"role": "user", "text": asked})
-        with st.chat_message("user"):
-            st.markdown(asked)
-        with st.chat_message("assistant"), st.spinner(
-                "Model is querying the tables…" if agentic else "Running deterministic tools…"):
-            res = CH.respond(asked, pattern=pid, date=str(period), agentic=agentic)
-            st.markdown(res["text"])
-            meta = res.get("meta") or {}
-            cap = (f"intent: `{res['intent']}` · "
-                   + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
-                      if meta.get("llm")
-                      else f"computed answer ({meta.get('gate', 'no LLM')})")
-                   + (f" · tools: {', '.join(meta['tools_called'])}"
-                      if meta.get("tools_called") else ""))
-            st.caption(cap)
-            if meta.get("violations"):
-                st.warning(f"Faithfulness gate rejected the LLM phrasing: {meta['violations']}")
-            st.session_state.chat.append({"role": "assistant", "text": res["text"],
-                                          "meta": cap})
-            with st.expander("Tool payload (what the answer was built from)"):
-                st.json(res.get("data") or {}, expanded=False)
-
-    st.divider()
-    st.markdown("##### Draft a valve change for approval")
-    case = AZ.analyze(pid, str(period))
-    if not case.get("ok"):
-        st.info(case.get("reason"))
-    else:
-        st.markdown(case["narrative"])
-        if case.get("draft"):
-            disabled = case["draft"]["action_type"] == "investigate_inputs"
-            if st.button("📤 Submit to approval queue (stage: draft → analyst)",
-                         type="primary", disabled=False):
-                res = T.submit_for_approval(pid, str(period), draft=case["draft"],
-                                            submitted_by=user)
-                st.success(f"Queued {res['action_id']} — next approver: {res['next_approver']}.")
-            if disabled:
-                st.caption("This draft is an *investigate inputs* item (suspect PVT), not a "
-                           "valve change — it still routes through the same approval chain.")
-        else:
-            st.info("No anomaly fired for this period — nothing to draft.")
 
 # -------------------------------------------------------------- Approval ----
 with tab_approve:
@@ -434,3 +381,84 @@ with tab_approve:
         " predicted_post_vrr, actual_post_vrr, approved_by, ts FROM"
         " vrr_agent.adjustment_history ORDER BY ts DESC LIMIT 25")),
         width="stretch", hide_index=True)
+
+# ------------------------------------------------------ Chat (every tab) ----
+# Deliberately OUTSIDE the tab blocks. Streamlit renders every tab in the same page,
+# so anything written here appears under whichever tab is open, and a top-level
+# `st.chat_input` is pinned to the bottom of the window rather than to a tab. Chat is
+# how an analyst interrogates what they are currently looking at; as a tab it forced
+# them to leave the chart in order to ask about the chart.
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+
+st.divider()
+head = st.container()
+h1, h2 = head.columns([3, 2])
+h1.markdown(f"#### 💬 Ask the agent — {ctx['pattern_name']}, {period:%b %Y}")
+agentic = h2.toggle(
+    "Model queries the tables itself (slower)", value=False, disabled=not llm_up,
+    help="Off: the deterministic pipeline runs the tools and the model only rewrites "
+         "the result (~10 s). On: the model chooses which tools/tables to query "
+         "(~1–2 min on a local 7B) — its answer is still gated, and rejected "
+         "narration falls back to the computed one.")
+head.caption("Numbers come from deterministic tools over Postgres. The local LLM, when "
+             "running, only rephrases the computed analysis — and its answer is discarded "
+             "if the faithfulness gate rejects it. The question always carries the "
+             "sidebar's pattern and period, so it follows whatever you are looking at.")
+
+quick = [f"Why is {ctx['pattern_name']}'s VRR {'high' if rows[-1]['vrr'] > target else 'low'} in {period:%B %Y}?",
+         f"Is the {period:%B %Y} number actually correct?",
+         f"How is {ctx['pattern_name']}'s VRR calculated?",
+         "What do the documents say about changing injection rates?"]
+asked = None
+for i, (col, prompt) in enumerate(zip(st.columns(4), quick)):
+    if col.button(prompt, width="stretch", key=f"quick{i}"):
+        asked = prompt
+
+# The transcript sits in an expander so a long conversation never buries the tab
+# content above it; the input below is pinned by Streamlit and always reachable.
+with st.expander(f"Conversation ({len(st.session_state.chat)} message(s))",
+                 expanded=bool(st.session_state.chat)):
+    if not st.session_state.chat:
+        st.caption("No questions yet — use a suggestion above or the box at the bottom "
+                   "of the window.")
+    for m in st.session_state.chat:
+        with st.chat_message(m["role"]):
+            st.markdown(m["text"])
+            if m.get("meta"):
+                st.caption(m["meta"])
+    if st.session_state.chat and st.button("Clear conversation"):
+        st.session_state.chat = []
+        st.rerun()
+
+    if asked := asked or st.session_state.pop("_pending_question", None):
+        st.session_state.chat.append({"role": "user", "text": asked})
+        with st.chat_message("user"):
+            st.markdown(asked)
+        with st.chat_message("assistant"), st.spinner(
+                "Model is querying the tables…" if agentic else "Running deterministic tools…"):
+            res = CH.respond(asked, pattern=pid, date=str(period), agentic=agentic)
+            st.markdown(res["text"])
+            meta = res.get("meta") or {}
+            cap = (f"intent: `{res['intent']}` · "
+                   + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
+                      if meta.get("llm")
+                      else f"computed answer ({meta.get('gate', 'no LLM')})")
+                   + (f" · tools: {', '.join(meta['tools_called'])}"
+                      if meta.get("tools_called") else ""))
+            st.caption(cap)
+            if meta.get("violations"):
+                st.warning(f"Faithfulness gate rejected the LLM phrasing: {meta['violations']}")
+            st.session_state.chat.append({"role": "assistant", "text": res["text"],
+                                          "meta": cap})
+            # Not an expander: Streamlit forbids nesting one inside the conversation
+            # expander this block renders into. `st.json(expanded=False)` collapses
+            # on its own and keeps the payload one click away.
+            st.caption("Tool payload (what the answer was built from):")
+            st.json(res.get("data") or {}, expanded=False)
+
+# Top-level (not in a tab, not in a container) → Streamlit pins it to the window
+# bottom, which is what makes the agent reachable from every tab.
+if typed := st.chat_input(f"Ask about {ctx['pattern_name']} {period:%b %Y}…"):
+    st.session_state._pending_question = typed
+    st.rerun()

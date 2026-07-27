@@ -61,10 +61,14 @@ make build
 make register
 
 # Launch the Streamlit UI at http://localhost:8501
-#   📈 Report tab       — VRR chart + date filter + target band + ΔVRR attribution
+#   🗺️ Portfolio tab   — every pattern's latest VRR vs target, ranked by drift
+#   📈 Report tab       — VRR chart + date filter + target band + ΔVRR attribution,
+#                         and the draft valve change for this period
 #   🔎 Lineage tab      — raw → PVT → contrib → monthly, plus an independent recompute
-#   💬 Analyst chat tab — ask the agent (deterministic tools; LLM phrasing when Ollama is up)
 #   ✅ Approval tab     — move drafts draft→analyst→rm→site→executed (core/approval)
+#   💬 Analyst chat     — NOT a tab: it sits under the tab strip with its input pinned to
+#                         the window bottom, so you can ask about whatever tab is open
+#                         (deterministic tools; LLM phrasing when Ollama is up)
 make app                          # Ctrl+C to stop
 
 # (Optional) Ask the agent — needs a local LLM via Ollama:

@@ -42,8 +42,9 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   `agent/analyst.py` (verify → attribute → classify → propose → draft) · `agent/chat.py`
   (intent router: deterministic by default, `agentic=True` lets the model drive the tool
   loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
-  `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (chart+date filter,
-  lineage+audit, chat, role-gated approval writing `adjustment_history`).
+  `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (portfolio, chart+date
+  filter+draft, lineage+audit, role-gated approval writing `adjustment_history`) with
+  the analyst chat always present under the tabs rather than as a tab of its own.
 - ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
   step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set
