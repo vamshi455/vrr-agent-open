@@ -253,3 +253,17 @@ CREATE TABLE IF NOT EXISTS vrr_agent.knowledge_registry (
   doc_id text PRIMARY KEY, file_name text, status text DEFAULT 'pending_review',
   reviewed_by text, pii_found boolean, pii_kinds text, n_chunks int, registered_at timestamptz DEFAULT now()
 );
+-- Analyst chat transcript. One row per question+answer turn asked in the Streamlit chat
+-- drawer, scoped by pattern and SHARED across users: opening a pattern shows what anyone
+-- already asked about it, so a review is not restarted from zero. Written only by the app
+-- (agent/history.py) and never by chat.respond(), so evaluation runs (make traces) do not
+-- pollute it. `payload` is the tool output the answer was built from (truncated); `meta`
+-- is the gate/LLM provenance rendered under each answer. Deletes are soft (deleted_at).
+CREATE TABLE IF NOT EXISTS vrr_agent.chat_history (
+  chat_id text PRIMARY KEY, id_pattern text NOT NULL, pattern_name text, vrr_date date,
+  question text NOT NULL, answer text, intent text, agentic boolean DEFAULT false,
+  llm_used boolean, model text, gate text, tools_called jsonb, meta jsonb, payload jsonb,
+  asked_by text, deleted_at timestamptz, run_id text, created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS chat_history_pattern_created_idx
+  ON vrr_agent.chat_history (id_pattern, created_at DESC);

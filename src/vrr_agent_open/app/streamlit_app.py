@@ -11,10 +11,11 @@ send a bounded valve change up the approval chain.
   ✅ Approval      role-gated draft → analyst → RM → site → executed; executing writes
                    vrr_agent.adjustment_history, closing the ρ-learning loop.
 
-💬 The analyst chat is NOT a tab — it lives below the tab strip and its input is pinned
-to the bottom of the window, so it is reachable from whichever tab is open. Chat is how
-you interrogate whatever you are currently looking at; making it a tab meant leaving the
-chart to ask about the chart. Answers are computed by deterministic tools and only
+💬 The analyst chat is NOT a tab — it is a collapsible drawer docked on the RIGHT, beside
+whichever tab is open, so you can ask about the chart without leaving the chart. Its
+transcript lives in `vrr_agent.chat_history` (agent/history.py), scoped to the selected
+pattern and shared across users: it survives a refresh, and opening a pattern shows what
+anyone already asked about it. Answers are computed by deterministic tools and only
 *phrased* by the LLM, behind the faithfulness gate.
 
 Every number rendered here comes from `agent.tools` / `core.*` — the app does no
@@ -23,6 +24,7 @@ arithmetic of its own. Run: `make app`.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import altair as alt
 import pandas as pd
@@ -34,12 +36,21 @@ from vrr_agent_open.core import approval as AP
 from vrr_agent_open.core import ids as IDS
 from vrr_agent_open.agent import analyst as AZ
 from vrr_agent_open.agent import chat as CH
+from vrr_agent_open.agent import history as HIST
 from vrr_agent_open.agent import llm as LLM
 from vrr_agent_open.agent import tools as T
 from vrr_agent_open.agent import tracing as TRACING
 
 CFG = load_config()
 st.set_page_config(page_title="VRR — Open", layout="wide", page_icon="🛢️")
+
+# The repo's only injected CSS, and it is purely cosmetic: it keeps the chat drawer in
+# view while the tab content scrolls. `st.container(key=…)` emits `.st-key-<key>`, so the
+# selector is a documented contract rather than an internal class name. If a future
+# Streamlit nests the drawer under an `overflow:hidden` block, sticky silently becomes
+# static and the drawer still works — the transcript has its own bounded height anyway.
+st.markdown("<style>.st-key-vrr_chat_drawer{position:sticky;top:3.5rem;}</style>",
+            unsafe_allow_html=True)
 
 # Which role is allowed to advance a draft that currently sits at each stage.
 APPROVER_FOR_STAGE = {"draft": "analyst", "analyst": "rm", "rm": "site", "site": "site"}
@@ -118,7 +129,18 @@ band = (mem.get("typical_low") or 0.9, mem.get("typical_high") or 1.1)
 window = [r for r in rows if d_from <= r["vrr_date"] <= d_to]
 df = pd.DataFrame(window)
 
-tab_portfolio, tab_report, tab_lineage, tab_approve = st.tabs(
+# Page splits into tab content + the chat drawer. BOTH columns always exist and only the
+# ratio changes: creating a single column when the drawer is shut would move the tab
+# element in the delta tree, and Streamlit keys the selected tab by element path — every
+# toggle would kick you back to Portfolio.
+if "drawer_open" not in st.session_state:
+    st.session_state.drawer_open = True
+main, drawer = st.columns([2.5, 1] if st.session_state.drawer_open else [16, 1],
+                          gap="medium")
+
+# `main.tabs(...)` rather than `with main:` — the tab bodies below then need no
+# re-indentation, so this restructure touches none of them.
+tab_portfolio, tab_report, tab_lineage, tab_approve = main.tabs(
     ["🗺️ Portfolio", "📈 Report", "🔎 Lineage & audit", "✅ Approval queue"])
 
 # ------------------------------------------------------------- Portfolio ----
@@ -382,83 +404,127 @@ with tab_approve:
         " vrr_agent.adjustment_history ORDER BY ts DESC LIMIT 25")),
         width="stretch", hide_index=True)
 
-# ------------------------------------------------------ Chat (every tab) ----
-# Deliberately OUTSIDE the tab blocks. Streamlit renders every tab in the same page,
-# so anything written here appears under whichever tab is open, and a top-level
-# `st.chat_input` is pinned to the bottom of the window rather than to a tab. Chat is
-# how an analyst interrogates what they are currently looking at; as a tab it forced
-# them to leave the chart in order to ask about the chart.
-if "chat" not in st.session_state:
-    st.session_state.chat = []
 
-st.divider()
-head = st.container()
-h1, h2 = head.columns([3, 2])
-h1.markdown(f"#### 💬 Ask the agent — {ctx['pattern_name']}, {period:%b %Y}")
-agentic = h2.toggle(
-    "Model queries the tables itself (slower)", value=False, disabled=not llm_up,
-    help="Off: the deterministic pipeline runs the tools and the model only rewrites "
-         "the result (~10 s). On: the model chooses which tools/tables to query "
-         "(~1–2 min on a local 7B) — its answer is still gated, and rejected "
-         "narration falls back to the computed one.")
-head.caption("Numbers come from deterministic tools over Postgres. The local LLM, when "
-             "running, only rephrases the computed analysis — and its answer is discarded "
-             "if the faithfulness gate rejects it. The question always carries the "
-             "sidebar's pattern and period, so it follows whatever you are looking at.")
+# ------------------------------------------ Chat drawer (docked, every tab) ----
+# Rendered into the `drawer` column, so it sits beside whichever tab is open instead of
+# under it — you interrogate the chart without leaving the chart. The transcript is read
+# from and written to `vrr_agent.chat_history`, so it survives a refresh and is shared:
+# opening a pattern shows what anyone already asked about it.
 
-quick = [f"Why is {ctx['pattern_name']}'s VRR {'high' if rows[-1]['vrr'] > target else 'low'} in {period:%B %Y}?",
-         f"Is the {period:%B %Y} number actually correct?",
-         f"How is {ctx['pattern_name']}'s VRR calculated?",
-         "What do the documents say about changing injection rates?"]
-asked = None
-for i, (col, prompt) in enumerate(zip(st.columns(4), quick)):
-    if col.button(prompt, width="stretch", key=f"quick{i}"):
-        asked = prompt
 
-# The transcript sits in an expander so a long conversation never buries the tab
-# content above it; the input below is pinned by Streamlit and always reachable.
-with st.expander(f"Conversation ({len(st.session_state.chat)} message(s))",
-                 expanded=bool(st.session_state.chat)):
-    if not st.session_state.chat:
-        st.caption("No questions yet — use a suggestion above or the box at the bottom "
-                   "of the window.")
-    for m in st.session_state.chat:
-        with st.chat_message(m["role"]):
-            st.markdown(m["text"])
-            if m.get("meta"):
-                st.caption(m["meta"])
-    if st.session_state.chat and st.button("Clear conversation"):
-        st.session_state.chat = []
+@st.cache_resource
+def history_ready() -> bool:
+    """Create chat_history once per process. schema.sql only runs on a fresh volume, so
+    this is what makes the table exist for an already-created database."""
+    try:
+        HIST.ensure_table()
+        return True
+    except Exception:
+        return False            # drawer degrades to this-session-only; never raises
+
+
+with drawer:
+    if st.button("✕" if st.session_state.drawer_open else "💬", key="drawer_toggle",
+                 width="stretch",
+                 help="Ask the agent about whatever tab you are looking at"):
+        st.session_state.drawer_open = not st.session_state.drawer_open
         st.rerun()
 
-    if asked := asked or st.session_state.pop("_pending_question", None):
-        st.session_state.chat.append({"role": "user", "text": asked})
-        with st.chat_message("user"):
-            st.markdown(asked)
-        with st.chat_message("assistant"), st.spinner(
-                "Model is querying the tables…" if agentic else "Running deterministic tools…"):
-            res = CH.respond(asked, pattern=pid, date=str(period), agentic=agentic)
-            st.markdown(res["text"])
-            meta = res.get("meta") or {}
-            cap = (f"intent: `{res['intent']}` · "
-                   + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
-                      if meta.get("llm")
-                      else f"computed answer ({meta.get('gate', 'no LLM')})")
-                   + (f" · tools: {', '.join(meta['tools_called'])}"
-                      if meta.get("tools_called") else ""))
-            st.caption(cap)
-            if meta.get("violations"):
-                st.warning(f"Faithfulness gate rejected the LLM phrasing: {meta['violations']}")
-            st.session_state.chat.append({"role": "assistant", "text": res["text"],
-                                          "meta": cap})
-            # Not an expander: Streamlit forbids nesting one inside the conversation
-            # expander this block renders into. `st.json(expanded=False)` collapses
-            # on its own and keeps the payload one click away.
-            st.caption("Tool payload (what the answer was built from):")
-            st.json(res.get("data") or {}, expanded=False)
+    if st.session_state.drawer_open:
+        with st.container(key="vrr_chat_drawer", border=True):
+            st.markdown(f"**💬 Ask about {ctx['pattern_name']}**")
+            st.caption(f"{period:%b %Y} · numbers come from deterministic tools over "
+                       "Postgres; the LLM only rephrases, behind the faithfulness gate.")
+            agentic = st.toggle(
+                "Model queries the tables itself", value=False, disabled=not llm_up,
+                help="Off: the deterministic pipeline runs the tools and the model only "
+                     "rewrites the result (~10 s). On: the model chooses which "
+                     "tools/tables to query (~1–2 min on a local 7B) — still gated, and "
+                     "rejected narration falls back to the computed one.")
 
-# Top-level (not in a tab, not in a container) → Streamlit pins it to the window
-# bottom, which is what makes the agent reachable from every tab.
-if typed := st.chat_input(f"Ask about {ctx['pattern_name']} {period:%b %Y}…"):
-    st.session_state._pending_question = typed
-    st.rerun()
+            quick = {"Why this VRR?": f"Why is {ctx['pattern_name']}'s VRR "
+                                      f"{'high' if rows[-1]['vrr'] > target else 'low'} "
+                                      f"in {period:%B %Y}?",
+                     "Is it correct?": f"Is the {period:%B %Y} number actually correct?",
+                     "How computed?": f"How is {ctx['pattern_name']}'s VRR calculated?",
+                     "Documents": "What do the documents say about changing injection rates?"}
+            asked = None
+            qa, qb = st.columns(2)
+            for i, (short_label, prompt) in enumerate(quick.items()):
+                if (qa if i % 2 == 0 else qb).button(short_label, width="stretch",
+                                                     key=f"quick{i}"):
+                    asked = prompt
+
+            # Created now, filled at the end: inside a column `st.chat_input` renders
+            # inline rather than pinned, so the answer can be written into a container
+            # declared above it — no _pending_question round-trip, one run per question.
+            transcript = st.container(height=420)
+            typed = st.chat_input(f"Ask about {ctx['pattern_name']}…", key="drawer_input")
+            asked = asked or typed
+
+            durable = history_ready()
+            if not durable:
+                st.caption("⚠️ History unavailable (`vrr_agent.chat_history` could not be "
+                           "created) — this conversation is session-only.")
+                st.session_state.setdefault("chat_fallback", [])
+
+            if asked:
+                with st.spinner("Model is querying the tables…" if agentic
+                                else "Running deterministic tools…"):
+                    res = CH.respond(asked, pattern=pid, date=str(period), agentic=agentic)
+                row = {"question": asked, "answer": res.get("text"),
+                       "intent": res.get("intent"), "meta": res.get("meta") or {},
+                       "payload": res.get("data") or {}, "asked_by": user}
+                if durable:
+                    try:            # a logging failure must never lose the answer
+                        HIST.log_turn(pattern_id=pid, pattern_name=ctx["pattern_name"],
+                                      date=str(period), question=asked, result=res,
+                                      asked_by=user, agentic=agentic)
+                    except Exception as exc:
+                        st.caption(f"(not saved to history: {exc})")
+                        st.session_state.setdefault("chat_fallback", []).append(row)
+                else:
+                    st.session_state.chat_fallback.append(row)
+
+            # Read AFTER the write, in the same run: the new turn is in the list exactly
+            # once, and a browser refresh renders the identical conversation.
+            if durable:
+                try:
+                    turns = HIST.recent(pid, limit=50,
+                                        since=st.session_state.get("history_hidden_before"))
+                except Exception:
+                    turns = []
+            else:
+                turns = st.session_state.get("chat_fallback", [])
+
+            with transcript:
+                if not turns:
+                    st.caption("Nothing asked about this pattern yet.")
+                for t in turns:
+                    with st.chat_message("user"):
+                        st.markdown(t["question"])
+                        if t.get("asked_by"):
+                            stamp = t.get("created_at")
+                            st.caption(f"{t['asked_by']}"
+                                       + (f" · {stamp:%d %b %H:%M}" if stamp else ""))
+                    with st.chat_message("assistant"):
+                        st.markdown(t.get("answer") or "_(no answer recorded)_")
+                        meta = t.get("meta") or {}
+                        st.caption(
+                            f"intent: `{t.get('intent')}` · "
+                            + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
+                               if meta.get("llm")
+                               else f"computed answer ({meta.get('gate', 'no LLM')})")
+                            + (f" · tools: {', '.join(meta['tools_called'])}"
+                               if meta.get("tools_called") else ""))
+                        if meta.get("violations"):
+                            st.warning(f"Gate rejected the LLM phrasing: {meta['violations']}")
+                        if t.get("payload"):
+                            st.json(t["payload"], expanded=False)
+
+            # Not a delete: the rows are shared, so one analyst must not be able to wipe
+            # another's audit trail. This just moves a session-local cutoff forward.
+            if turns and st.button("Hide history in this view", width="stretch"):
+                st.session_state.history_hidden_before = datetime.now(timezone.utc)
+                st.session_state.chat_fallback = []
+                st.rerun()

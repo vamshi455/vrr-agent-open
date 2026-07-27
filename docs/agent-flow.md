@@ -13,9 +13,9 @@ together. Companion to [design.md](design.md) (why) and [running.md](running.md)
       │ 🔎 Lineage     raw → PVT → contrib → monthly + RECOMPUTE │
       │ ✅ Approval    draft → analyst → RM → site → executed    │
       ├─────────────────────────────────────────────────────────┤
-      │ 💬 Chat — under every tab, input pinned to the window    │
-      │    bottom; carries the sidebar's pattern + period, so it │
-      │    asks about whatever you are looking at               │
+      │ 💬 Chat — a drawer docked RIGHT of every tab, collapsible │
+      │    with 💬/✕; carries the sidebar's pattern + period, and │
+      │    its transcript persists in vrr_agent.chat_history     │
       └────────────────────────┬────────────────────────────────┘
                                │ every number
       ┌────────────────────────▼────────────────────────────────┐

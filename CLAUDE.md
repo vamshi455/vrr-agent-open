@@ -44,7 +44,8 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   loop; both gated) · `agent/llm.py` (Ollama client, model auto-detect) ·
   `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (portfolio, chart+date
   filter+draft, lineage+audit, role-gated approval writing `adjustment_history`) with
-  the analyst chat always present under the tabs rather than as a tab of its own.
+  the analyst chat as a right-docked collapsible drawer beside every tab, its transcript
+  persisted per pattern in `vrr_agent.chat_history` (`agent/history.py`) and shared across users.
 - ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
   step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set

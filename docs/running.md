@@ -66,9 +66,10 @@ make register
 #                         and the draft valve change for this period
 #   🔎 Lineage tab      — raw → PVT → contrib → monthly, plus an independent recompute
 #   ✅ Approval tab     — move drafts draft→analyst→rm→site→executed (core/approval)
-#   💬 Analyst chat     — NOT a tab: it sits under the tab strip with its input pinned to
-#                         the window bottom, so you can ask about whatever tab is open
-#                         (deterministic tools; LLM phrasing when Ollama is up)
+#   💬 Analyst chat     — NOT a tab: a collapsible drawer docked on the RIGHT of whatever
+#                         tab is open (💬/✕ to toggle). The transcript is stored in
+#                         vrr_agent.chat_history, so it survives a refresh and is shared
+#                         per pattern (deterministic tools; LLM phrasing when Ollama is up)
 make app                          # Ctrl+C to stop
 
 # (Optional) Ask the agent — needs a local LLM via Ollama:
