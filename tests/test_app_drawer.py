@@ -83,6 +83,26 @@ def test_history_is_scoped_to_one_pattern(hist):
                 if t["question"] == "scoped?"]
 
 
+def test_lineage_answers_with_and_without_a_period(hist):
+    """Regression: chat.py read `formulas['vrr']`, but the tool emits `vrr_bblbbl`.
+
+    Every lineage question asked from the app (which always supplies a period) died on
+    a KeyError, and the eval case never caught it because it passes date=None, which
+    short-circuited before the crash. Both paths must now produce a real derivation.
+    """
+    from vrr_agent_open.agent import chat as CH
+    from vrr_agent_open.agent import tools as T
+
+    pattern = T.list_patterns()[0]
+    latest = str(T.vrr_trend(pattern["pattern_id"])["rows"][-1]["vrr_date"])
+    for date in (latest, None):
+        res = CH.respond(f"How is {pattern['pattern_name']}'s VRR calculated?",
+                         pattern=pattern["pattern_id"], date=date, use_llm=False)
+        assert res["intent"] == "lineage"
+        assert "completion_contrib" in res["text"] and "FACTOR" in res["text"]
+        assert "no rows found" not in res["text"]
+
+
 def test_respond_does_not_write_history(hist):
     """The eval harness calls respond() ten times per `make traces`."""
     from vrr_agent_open.agent import chat as CH

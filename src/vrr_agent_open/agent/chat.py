@@ -318,12 +318,22 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
                 "meta": {"llm": False}}
 
     if intent == "lineage":
-        lin = T.vrr_lineage(pid, when) if when else None
+        # Same fallback as `audit` below: "how is VRR calculated?" carries no period, and
+        # the honest answer is the latest one rather than a request to pick a month.
+        when = when or str(T.vrr_trend(pid)["rows"][-1]["vrr_date"])
+        lin = T.vrr_lineage(pid, when)
         if not lin or not lin.get("found"):
             return {"intent": "lineage", "text": "Pick a period to trace (no rows found).",
                     "data": lin or {}, "meta": {"llm": False}}
+        terms = lin["formulas"]
         L = [f"**How {lin['pattern_name']}'s VRR for {lin['vrr_date']} was computed**", "",
-             f"`{lin['formulas']['vrr']}`", "",
+             f"`{terms['vrr_bblbbl']}`", "",
+             "Each surface volume becomes a reservoir volume first (`core.physics`):",
+             f"- oil — `{terms['res_oil_volume_bbl']}`",
+             f"- water — `{terms['res_water_volume_bbl']}`",
+             f"- free gas — `{terms['res_free_gas_volume_bbl']}`",
+             f"- water injection — `{terms['res_water_inj_volume_bbl']}`",
+             f"- gas injection — `{terms['res_gas_inj_volume_bbl']}`", "",
              f"Aggregate row: prod {lin['monthly']['prod_res_bbl']:,.0f} rb, "
              f"inj {lin['monthly']['inj_res_bbl']:,.0f} rb, VRR {lin['monthly']['vrr']:.3f} "
              f"(run_id {lin['monthly'].get('run_id')}).", "",
