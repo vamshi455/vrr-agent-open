@@ -70,6 +70,49 @@ fabricating figures more often (it likes to compute daily averages) — when tha
 the computed answer is shown with the violation displayed, which is the designed
 outcome, not a failure.
 
+### The agentic mode is a LangGraph `StateGraph`
+
+`agent/graph.py` compiles this once per process (`graph.GRAPH`; `build()` returns an
+uncompiled copy for inspection — `build().get_graph().draw_mermaid()`):
+
+```mermaid
+graph TD;
+  __start__([start]) --> plan
+  plan -. tool_calls .-> tools
+  plan -. answer .-> gate
+  plan -. steps = max_steps .-> budget
+  tools --> plan
+  gate -. rejected, first attempt .-> repair
+  gate -. passed, or already repaired .-> __end__([end])
+  repair --> gate
+  budget --> __end__
+```
+
+| Node | Does | May speak |
+|---|---|---|
+| `plan` | the model picks a tool from the 15 specs, or answers | ✅ (the only one) |
+| `tools` | runs them over Postgres, harvests every returned number into `facts` | ❌ |
+| `gate` | `core.faithfulness` — drivers must match the decomposition, numbers must be in `facts` | ❌ |
+| `repair` | one rewrite with the violation fed back, **tools withheld** | ✅ |
+| `budget` | terminal when `max_steps` model turns are spent | ❌ |
+
+What the framework buys over the hand-rolled loop it replaced:
+
+- **The state schema is the contract.** `messages`, `trace`, and `facts` use
+  `Annotated[list, operator.add]`, so a node returns only what it *adds*. No step can
+  drop evidence the gate is about to check.
+- **The gate is an edge, not a convention.** Every path from `plan` to `END` runs
+  through `gate`, including the repaired text (`repair → gate`, not `repair → END`).
+- **Runs are resumable.** The graph compiles with an `InMemorySaver`, so
+  `run(..., thread_id="x")` continues that conversation with its messages and evidence
+  intact instead of restarting.
+- **The topology is testable.** `tests/test_graph.py` asserts the edges and every path
+  through them — repair-once, budget exhaustion, resume — with the model and the
+  database both stubbed, so it runs in the off-DB `pytest -q` tier.
+
+`max_steps` (default 6) counts model turns; `recursion_limit` sits above it as a
+backstop, since one turn can fan out to tools and back.
+
 ## General VRR questions
 
 Conceptual questions ("what is VRR", "what happens if you over-inject") are routed to a
