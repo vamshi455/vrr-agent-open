@@ -70,6 +70,52 @@ def execute(sql: str, params: dict) -> None:
         c.commit()
 
 
+# ---- chat provenance, in analyst English ------------------------------------
+# The drawer used to print `intent: general · gate n/a (no field figures claimed)` and a
+# raw JSON blob under every turn. That is the right information — where an answer came
+# from is the whole trust argument — but it read like a debug log. These two helpers
+# translate the same meta into one plain caption; the JSON moves into an expander.
+INTENT_LABEL = {
+    "explain": "Computed from your tables",
+    "recommend": "Computed from your tables",
+    "audit": "Input audit",
+    "lineage": "Lineage",
+    "completions": "Completion list",
+    "portfolio": "Portfolio scan",
+    "data_quality": "Data-quality check",
+    "knowledge": "From your documents",
+    "general": "General knowledge — not your data",
+}
+
+
+def provenance_line(intent: str | None, meta: dict) -> str:
+    """One caption saying who produced the answer and whether the gate cleared it."""
+    source = INTENT_LABEL.get(intent or "", (intent or "answer").replace("_", " ").title())
+    gate = str(meta.get("gate") or "")
+    if not meta.get("llm"):
+        phrasing = "computed wording, no LLM"
+    elif gate.startswith("REJECTED"):
+        phrasing = f"⚠️ {meta.get('model') or 'LLM'} phrasing rejected — computed wording shown"
+    elif "repair" in gate:
+        phrasing = f"{meta.get('model') or 'LLM'} phrasing · ✅ gate passed after one repair"
+    elif gate.startswith("n/a"):
+        phrasing = f"{meta.get('model') or 'LLM'} · no field figures to verify"
+    elif gate.startswith("skipped"):
+        phrasing = "computed wording — LLM unavailable"
+    else:
+        phrasing = f"{meta.get('model') or 'LLM'} phrasing · ✅ gate passed"
+    tools = meta.get("tools_called")
+    return (f"{source} · {phrasing}"
+            + (f" · tools: {', '.join(tools)}" if tools else ""))
+
+
+def gate_violation_line(v: dict | str) -> str:
+    """A gate violation as a sentence, not a dict repr."""
+    if not isinstance(v, dict):
+        return str(v)
+    return v.get("detail") or f"{v.get('kind', 'violation')} on {v.get('term', '?')}"
+
+
 @st.cache_data(ttl=60)
 def patterns() -> list[dict]:
     return T.list_patterns()
@@ -510,17 +556,33 @@ with drawer:
                     with st.chat_message("assistant"):
                         st.markdown(t.get("answer") or "_(no answer recorded)_")
                         meta = t.get("meta") or {}
-                        st.caption(
-                            f"intent: `{t.get('intent')}` · "
-                            + (f"{meta.get('model', 'LLM')} · gate {meta.get('gate')}"
-                               if meta.get("llm")
-                               else f"computed answer ({meta.get('gate', 'no LLM')})")
-                            + (f" · tools: {', '.join(meta['tools_called'])}"
-                               if meta.get("tools_called") else ""))
-                        if meta.get("violations"):
-                            st.warning(f"Gate rejected the LLM phrasing: {meta['violations']}")
-                        if t.get("payload"):
-                            st.json(t["payload"], expanded=False)
+                        st.caption(provenance_line(t.get("intent"), meta))
+                        # The evidence is the point of this agent, but it is reference
+                        # material, not the answer — one collapsed expander keeps the
+                        # transcript readable while leaving every number one click from
+                        # the tool output it came from.
+                        # `violations` = the gate threw the narration away;
+                        # `first_attempt_violations` = it was repaired on retry. Both are
+                        # worth keeping — they are the audit trail of the gate doing its job.
+                        caught = (meta.get("violations")
+                                  or meta.get("first_attempt_violations") or [])
+                        if caught or t.get("payload"):
+                            with st.expander("Evidence & provenance", expanded=False):
+                                if caught:
+                                    st.warning(
+                                        "Gate rejected the model's phrasing — computed "
+                                        "wording shown instead:" if meta.get("violations")
+                                        else "Gate caught this on the first attempt and "
+                                             "had the model rewrite it:")
+                                    for v in caught:
+                                        st.markdown(f"- {gate_violation_line(v)}")
+                                    if meta.get("uncited_numbers"):
+                                        st.markdown(
+                                            "- numbers with no tool output behind them: "
+                                            f"{', '.join(str(n) for n in meta['uncited_numbers'])}")
+                                if t.get("payload"):
+                                    st.caption("Raw tool output behind this answer")
+                                    st.json(t["payload"], expanded=False)
 
             # Not a delete: the rows are shared, so one analyst must not be able to wipe
             # another's audit trail. This just moves a session-local cutoff forward.
