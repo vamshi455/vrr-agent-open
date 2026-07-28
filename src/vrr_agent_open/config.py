@@ -9,6 +9,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# A local `.env` (gitignored) is the only place API keys live — never a literal in code
+# and never a committed file. Real environment variables always win over the file, so a
+# CI or shell export still overrides it.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except ImportError:                       # dotenv is optional; env vars still work
+    pass
+
 # Governance / VRR domain constants (ported from the Databricks version).
 DEFAULT_TARGET_VRR = 1.0
 TARGET_BAND = (0.9, 1.1)          # green "on target" band (anomaly.py imports this)
@@ -38,8 +48,37 @@ class Config:
     # chat model is actually pulled, so a different local model still works.
     llm_model: str = os.environ.get("VRR_LLM_MODEL", "qwen2.5:7b")
     llm_base_url: str = os.environ.get("VRR_LLM_BASE_URL", "http://localhost:11434")
+    # --- optional hosted providers (BILLABLE — off unless a key is set) ---
+    # `VRR_LLM_PROVIDER=anthropic|openai` switches the narrator; the deterministic tools,
+    # the physics and the faithfulness gate are unchanged by the choice.
+    anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
+    anthropic_model: str = os.environ.get("VRR_ANTHROPIC_MODEL", "claude-sonnet-5")
+    openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+    openai_model: str = os.environ.get("VRR_OPENAI_MODEL", "gpt-4o-mini")
+    # --- embeddings for the pgvector knowledge index ---
+    # Local `nomic-embed-text` is 768-dim, which is what schema.sql declares. Changing
+    # this means changing that column, so it is deliberately separate from the narrator.
+    embed_provider: str = os.environ.get("VRR_EMBED_PROVIDER", "ollama")
+    embed_model: str = os.environ.get("VRR_EMBED_MODEL", "nomic-embed-text")
+    # --- retrieval (RAG) ---
+    # A chunk below this cosine similarity is NOISE, not an answer: without a floor the
+    # top-k always returns k rows, so an unanswerable question still hands the model four
+    # confident-looking excerpts. See `pipeline/knowledge_ingest.search`.
+    #
+    # 0.62 is MEASURED, not guessed — `make floor` scores answerable vs off-topic
+    # questions against the live index. With nomic-embed-text, unrelated text still
+    # scores ~0.40-0.56 (the embedder has a high similarity baseline), so an intuitive
+    # 0.35 admits everything and the abstain path never fires. Re-run `make floor` after
+    # changing the embedding model or materially changing the corpus.
+    retrieval_min_score: float = float(os.environ.get("VRR_RETRIEVAL_MIN_SCORE", "0.62"))
 
     default_target_vrr: float = DEFAULT_TARGET_VRR
+
+    def model_for(self, provider: str | None = None) -> str:
+        """The model name this provider should use."""
+        return {"anthropic": self.anthropic_model,
+                "openai": self.openai_model}.get(provider or self.llm_provider,
+                                                 self.llm_model)
 
     def table(self, schema: str, name: str) -> str:
         return f"{schema}.{name}"          # Postgres schema-qualified

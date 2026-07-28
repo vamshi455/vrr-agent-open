@@ -1,4 +1,9 @@
-.PHONY: up down install test seed build audit knowledge queue register app agent
+# Prefer the project venv when one exists, so `make` works without activating it (and is
+# never hijacked by whatever `python` a conda base env happens to put first on PATH).
+# Override explicitly with `make <target> PYTHON=...` to use a different interpreter.
+PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
+
+.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register app agent \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -14,43 +19,55 @@ test:          ## run the pure off-DB unit tests (no stack needed)
 	pytest -q
 
 seed:          ## generate + load synthetic VRR data into Postgres
-	python -m vrr_agent_open.pipeline.seed
+	$(PYTHON) -m vrr_agent_open.pipeline.seed
 
 build:         ## rebuild vrr_curated from vrr_raw only (core.physics; no reseed)
-	python -m vrr_agent_open.pipeline.build
+	$(PYTHON) -m vrr_agent_open.pipeline.build
 
 audit:         ## input-audit gate: verdict per pattern (DATA_ARTIFACT vs REAL_SIGNAL)
-	python -m vrr_agent_open.pipeline.input_audit
+	$(PYTHON) -m vrr_agent_open.pipeline.input_audit
 
-knowledge:     ## register PDFs in ./knowledge_uploads, then ingest the APPROVED ones
-	python -m vrr_agent_open.pipeline.knowledge_ingest
+knowledge:     ## register docs in ./knowledge_uploads, then ingest the APPROVED ones
+	$(PYTHON) -m vrr_agent_open.pipeline.knowledge_ingest
+
+loaders:       ## load ./knowledge_uploads (or from=… / a URL) → List[Document] summary
+	$(PYTHON) -m vrr_agent_open.pipeline.document_loaders $(or $(from),./knowledge_uploads)
+
+chunks:        ## compare chunking strategies, scored by retrieval (recall@k, MRR)
+	$(PYTHON) -m vrr_agent_open.pipeline.text_splitters
+
+floor:         ## measure the retrieval similarity floor (answerable vs off-topic)
+	$(PYTHON) scripts/calibrate_floor.py
+
+llm-check:     ## can each provider do a completion AND tool calling? (add p=openai)
+	$(PYTHON) scripts/check_llm.py $(p)
 
 queue:         ## run the anomaly → action_queue job (drafts for human approval)
-	python -m vrr_agent_open.pipeline.anomaly_to_queue
+	$(PYTHON) -m vrr_agent_open.pipeline.anomaly_to_queue
 
 agent-model:   ## log + register the agent as an MLflow model (alias: candidate)
-	python scripts/register_model.py
+	$(PYTHON) scripts/register_model.py
 
 prompts:       ## push prompt templates to the MLflow Prompt Registry (alias: production)
-	python scripts/register_prompt.py
+	$(PYTHON) scripts/register_prompt.py
 
 traces:        ## run the agent over data/evaluation questions, logging traces + expectations
-	python scripts/create_traces.py
+	$(PYTHON) scripts/create_traces.py
 
 eval:          ## score recent traces (deterministic scorers + LLM judges if a model is up)
-	python scripts/evaluate_model.py --eval-only
+	$(PYTHON) scripts/evaluate_model.py --eval-only
 
 judges:        ## register the LLM judges server-side (add --start for automatic scoring)
-	python scripts/register_judge.py
+	$(PYTHON) scripts/register_judge.py
 
 register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
-	python -m vrr_agent_open.governance.uc_register
+	$(PYTHON) -m vrr_agent_open.governance.uc_register
 
 app:           ## launch the Streamlit review + approval UI
-	streamlit run src/vrr_agent_open/app/streamlit_app.py
+	$(PYTHON) -m streamlit run src/vrr_agent_open/app/streamlit_app.py
 
 agent:         ## run one agent question from the CLI
-	python -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"
+	$(PYTHON) -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"
 
 lint:
 	ruff check src tests

@@ -12,17 +12,23 @@ from __future__ import annotations
 import httpx
 
 from ..config import load_config
-from . import tracing
+from . import providers, tracing
 
 CFG = load_config()
 
 
+def provider() -> str:
+    """Which backend is configured (`VRR_LLM_PROVIDER`): ollama | openai | anthropic."""
+    return (CFG.llm_provider or "ollama").lower()
+
+
 def available(timeout: float = 1.5) -> bool:
-    """Is a local model server reachable right now?"""
-    try:
-        return httpx.get(f"{CFG.llm_base_url}/api/tags", timeout=timeout).status_code == 200
-    except Exception:
-        return False
+    """Is the configured model backend usable right now?
+
+    Local: is Ollama up. Hosted: is an API key configured. Callers use this to decide
+    whether to take the LLM path at all, so it must stay cheap and never raise.
+    """
+    return providers.available(provider(), timeout)
 
 
 def models() -> list[str]:
@@ -38,7 +44,10 @@ def pick_model(preferred: str | None = None) -> str | None:
 
     Falls back to any installed chat model (skipping embedding-only models) so a fresh
     machine with a different pull still works instead of erroring on model-not-found.
+    Hosted providers have no local inventory to reconcile, so the configured name stands.
     """
+    if provider() != "ollama":
+        return preferred or CFG.model_for(provider())
     have = models()
     want = preferred or CFG.llm_model
     if not have:
@@ -53,17 +62,16 @@ def pick_model(preferred: str | None = None) -> str | None:
 @tracing.trace("llm.chat", span_type="LLM")
 def chat(messages: list[dict], tools: list[dict] | None = None,
          model: str | None = None, temperature: float = 0.0,
-         timeout: float = 180) -> dict:
+         timeout: float = 180, provider_name: str | None = None) -> dict:
     """One turn. Returns the assistant message dict ``{content, tool_calls?}``.
+
+    The same call shape for every backend — `providers.py` translates it for whichever
+    one is configured, so the graph, the narrator and the RAG path never branch on it.
 
     ``temperature=0`` by default: this agent narrates computed results, so sampling
     variety is a liability, not a feature.
     """
-    payload: dict = {"model": model or pick_model() or CFG.llm_model,
-                     "messages": messages, "stream": False,
-                     "options": {"temperature": temperature}}
-    if tools:
-        payload["tools"] = tools
-    r = httpx.post(f"{CFG.llm_base_url}/api/chat", json=payload, timeout=timeout)
-    r.raise_for_status()
-    return r.json().get("message", {}) or {}
+    who = (provider_name or provider()).lower()
+    return providers.complete(who, messages, tools,
+                              model or pick_model() or CFG.model_for(who),
+                              temperature, timeout)

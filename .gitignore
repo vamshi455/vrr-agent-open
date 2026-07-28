@@ -10,3 +10,5 @@ dist/
 mlruns/
 .DS_Store
 knowledge_uploads/
+mlflow.db
+mlartifacts/
