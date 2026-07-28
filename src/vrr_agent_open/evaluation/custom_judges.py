@@ -25,9 +25,16 @@ CFG = load_config()
 # The judge model is separate from the agent's narrator: it may be a bigger local model,
 # or a hosted one, without touching how the agent runs.
 JUDGE_MODEL = os.environ.get("VRR_JUDGE_MODEL", f"openai:/{CFG.llm_model}")
-# Ollama speaks the OpenAI wire format at /v1, so the `openai:/` provider reaches it with
-# no extra dependency. Overridden by OPENAI_API_BASE if the caller sets one.
-JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE", f"{CFG.llm_base_url}/v1")
+# Ollama speaks the OpenAI wire format, so the `openai:/` provider reaches it with no
+# extra dependency — but `base_url` must be the FULL endpoint, not the API root: MLflow
+# POSTs to exactly this URL rather than appending `/chat/completions` to it. With
+# `…/v1` every judge died on `404 page not found`, silently, so `make eval` reported the
+# 6 deterministic scorers and none of the 3 judges — a green run that had scored nothing
+# it claimed to. Overridden by OPENAI_API_BASE if the caller sets one.
+JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE",
+                                f"{CFG.llm_base_url}/v1/chat/completions")
+# litellm requires a key to be present even when the endpoint ignores it (Ollama does).
+os.environ.setdefault("OPENAI_API_KEY", "ollama-local")
 
 PROVENANCE_CITED = """
 Examine {{ trace }}. Rate the final response on whether it attributes its figures to
