@@ -179,8 +179,19 @@ def _knowledge_answer(question: str, use_llm: bool = True, k: int = 4) -> dict:
                          "again to chunk → PII-redact → embed → store.")}
     found = hits.get("hits") or []
     if not found:
-        return {"intent": "knowledge", "data": hits, "meta": {"llm": False},
-                "text": "No matching chunks in the knowledge index yet."}
+        # The abstain path, and the reason the similarity floor exists: nothing cleared
+        # it, so there is nothing to answer FROM. Saying that is the correct answer —
+        # handing the model the four nearest rows regardless is how a confident wrong
+        # answer gets produced. The model is never called here.
+        return {"intent": "knowledge", "data": hits,
+                "meta": {"llm": False, "gate": "abstained (no chunk above the floor)",
+                         "retrieved": 0},
+                "text": ("I don't know — the ingested documents contain nothing "
+                         f"relevant to that (nothing scored above "
+                         f"{hits.get('min_score', 'the similarity floor')}).\n\n"
+                         "Either the document covering it has not been ingested, or it "
+                         "is a field-data question — ask about a pattern and period and "
+                         "the deterministic tools will answer it from Postgres.")}
 
     sources = "\n\n".join(f"[{h['file_name']} p.{h['page']}] (similarity {h['score']:.2f})\n"
                           f"{h['text']}" for h in found)
@@ -231,7 +242,8 @@ def general_answer(question: str, use_llm: bool = True) -> dict:
              + " — not computed from your Postgres tables._")
     return {"intent": "general", "text": f"{text}\n\n{label}",
             "data": {"knowledge_hits": hits.get("hits", [])},
-            "meta": {"llm": True, "gate": "n/a (no field figures claimed)",
+            "meta": {"llm": True, "model": llm.pick_model(),
+                     "gate": "n/a (no field figures claimed)",
                      "grounded": bool(context)}}
 
 

@@ -1,9 +1,10 @@
 """PDF → pgvector knowledge ingestion (OSS equivalent of 11_knowledge_ingest).
 
 Flow (see docs/knowledge-flow.md):
-  1. REGISTER   a PDF dropped in ./knowledge_uploads/ → knowledge_registry (pending_review)
+  1. REGISTER   a document dropped in ./knowledge_uploads/ → knowledge_registry
+                (pending_review). PDF/txt/md/html/docx/csv — see document_loaders.py
   2. REVIEW     a HUMAN sets status='approved' (VRR-relevant only) — not automated
-  3. INGEST     parse (pypdf) → chunk (core.knowledge.chunk_text) → PII detect/REDACT
+  3. INGEST     load (document_loaders) → chunk (text_splitters) → PII detect/REDACT
                 (core.knowledge.redact_pii) → EMBED (local model) → INSERT into
                 vrr_agent.reservoir_knowledge (pgvector), PII never reaching the DB
   4. SEARCH     the agent's SEARCH_KNOWLEDGE tool runs `embedding <=> query` (cosine)
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pathlib
 
 import httpx
 import psycopg
@@ -58,12 +60,14 @@ def normalize_page(text: str) -> str:
 
 
 def register_new() -> int:
-    """Step 1 — register new PDFs in the volume as pending_review."""
+    """Step 1 — register new documents in the volume as pending_review."""
+    from . import document_loaders as DL
+
     n = 0
     with _conn() as c, c.cursor() as cur:
         for f in os.listdir(UPLOAD_DIR):
-            if not f.lower().endswith(".pdf"):
-                continue
+            if pathlib.Path(f).suffix.lower() not in DL.SUFFIX_LOADERS:
+                continue          # .pdf/.txt/.md/.html/.docx/.csv — see document_loaders
             doc_id = hashlib.sha1(f.encode()).hexdigest()
             cur.execute(
                 "INSERT INTO vrr_agent.knowledge_registry (doc_id, file_name, status) "
@@ -74,28 +78,39 @@ def register_new() -> int:
     return n
 
 
-def ingest_approved() -> int:
-    """Step 3 — chunk + PII-redact + embed every approved-but-not-ingested doc."""
-    from pypdf import PdfReader
+def ingest_approved(strategy: str | None = None) -> int:
+    """Step 3 — load + chunk + PII-redact + embed every approved-but-not-ingested doc.
+
+    Loading goes through `document_loaders` (so .txt/.html/.docx/.csv ingest exactly like
+    a PDF does) and chunking through `text_splitters` (default `recursive`, the strategy
+    that measured best — see `make chunks`). `VRR_CHUNK_STRATEGY` overrides it; changing
+    it means re-ingesting, since chunk boundaries are baked into the stored embeddings.
+    """
+    from . import document_loaders as DL
+    from . import text_splitters as TS
+
+    strategy = strategy or os.environ.get("VRR_CHUNK_STRATEGY", "recursive")
     done = 0
     with _conn() as c, c.cursor() as cur:
         cur.execute("SELECT doc_id, file_name FROM vrr_agent.knowledge_registry "
                     "WHERE status='approved' AND n_chunks IS NULL")
         for doc_id, fname in cur.fetchall():
-            reader = PdfReader(os.path.join(UPLOAD_DIR, fname))
+            pages = DL.load_file(os.path.join(UPLOAD_DIR, fname))
+            for p in pages:                       # undo PDF layout wrapping before split
+                p.page_content = normalize_page(p.page_content)
             kinds, seq = set(), 0
-            for pageno, page in enumerate(reader.pages, start=1):
-                for chunk in kn.chunk_text(normalize_page(page.extract_text() or "")):
-                    clean, k = kn.redact_pii(chunk)          # PII never reaches the DB
-                    kinds.update(k)
-                    cur.execute(
-                        "INSERT INTO vrr_agent.reservoir_knowledge "
-                        "(chunk_id, doc_id, file_name, page, chunk_seq, text, pii_redacted, embedding) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (chunk_id) DO UPDATE "
-                        "SET text=EXCLUDED.text, embedding=EXCLUDED.embedding",
-                        (f"{doc_id}:{pageno}:{seq}", doc_id, fname, pageno, seq,
-                         clean, bool(k), embed(clean)))
-                    seq += 1
+            for piece in TS.split_documents(pages, strategy=strategy):
+                clean, k = kn.redact_pii(piece.page_content)  # PII never reaches the DB
+                kinds.update(k)
+                pageno = int(piece.metadata.get("page", 1))
+                cur.execute(
+                    "INSERT INTO vrr_agent.reservoir_knowledge "
+                    "(chunk_id, doc_id, file_name, page, chunk_seq, text, pii_redacted, embedding) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (chunk_id) DO UPDATE "
+                    "SET text=EXCLUDED.text, embedding=EXCLUDED.embedding",
+                    (f"{doc_id}:{pageno}:{seq}", doc_id, fname, pageno, seq,
+                     clean, bool(k), embed(clean)))
+                seq += 1
             cur.execute("UPDATE vrr_agent.knowledge_registry SET n_chunks=%s, "
                         "pii_found=%s, pii_kinds=%s WHERE doc_id=%s",
                         (seq, bool(kinds), ",".join(sorted(kinds)) or None, doc_id))
@@ -104,15 +119,28 @@ def ingest_approved() -> int:
     return done
 
 
-def search(query: str, k: int = 5) -> list[dict]:
-    """Step 4 — the SEARCH_KNOWLEDGE tool: cosine nearest chunks (pgvector `<=>`)."""
+def search(query: str, k: int = 5, min_score: float | None = None) -> list[dict]:
+    """Step 4 — the SEARCH_KNOWLEDGE tool: cosine nearest chunks (pgvector `<=>`).
+
+    Filtered by a similarity FLOOR, not just top-k. Without one, `LIMIT k` always
+    returns k rows: ask about something the corpus never covered and the model still
+    receives four confident-looking excerpts, which is precisely the situation where it
+    invents an answer instead of saying it does not know. Below the floor we return
+    nothing, and the caller says so.
+
+    `VRR_RETRIEVAL_MIN_SCORE` tunes it (default 0.35); pass `min_score=0` to see the
+    raw ranking, which is what `retrieval_check` wants when comparing chunkers.
+    """
+    floor = CFG.retrieval_min_score if min_score is None else min_score
     vec = str(embed(query))              # embed ONCE, reuse for score + ordering
     with _conn() as c:
         with c.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
                 "SELECT file_name, page, text, 1 - (embedding <=> %(v)s::vector) AS score "
                 "FROM vrr_agent.reservoir_knowledge "
-                "ORDER BY embedding <=> %(v)s::vector LIMIT %(k)s", {"v": vec, "k": k})
+                "WHERE 1 - (embedding <=> %(v)s::vector) >= %(floor)s "
+                "ORDER BY embedding <=> %(v)s::vector LIMIT %(k)s",
+                {"v": vec, "k": k, "floor": floor})
             return cur.fetchall()
 
 

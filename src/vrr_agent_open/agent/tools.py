@@ -625,8 +625,12 @@ def search_knowledge(query: str, k: int = 3) -> dict:
     system at all — a TOOL span is invisible to them.
     """
     try:
+        from ..config import load_config
         from ..pipeline.knowledge_ingest import search
-        return {"ok": True, "hits": search(query, k)}
+        # `hits` may legitimately be empty: chunks below the similarity floor are noise,
+        # and reporting the floor lets the caller say WHY it is abstaining.
+        return {"ok": True, "hits": search(query, k),
+                "min_score": load_config().retrieval_min_score}
     except Exception as e:                     # no Ollama / no ingested docs
         return {"ok": False, "reason": f"knowledge search unavailable: {e}"}
 

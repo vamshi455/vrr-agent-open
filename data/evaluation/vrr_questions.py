@@ -129,6 +129,24 @@ QUESTIONS: list[dict] = [
         "note": "RAG grounding: the answer must come from the retrieved excerpt.",
     },
     {
+        "id": "rulebook_unanswerable",
+        "question": "What do the documents say about the flare gas recovery compressor "
+                    "trip setpoint?",
+        "pattern": None, "date": None,
+        "expected_intent": "knowledge",
+        "expected_tools": ["SEARCH_KNOWLEDGE"],
+        "forbidden_tools": ["RECOMMEND_CHANGE"],
+        "expected_verdict": None,
+        "must_mention": ["don't know"],
+        "must_not_mention": ["setpoint is", "psi", "the documents state"],
+        "note": "The NEGATIVE RAG case, and the one the set was missing: nothing in the "
+                "corpus covers flare gas, so every retrieved chunk falls below the "
+                "similarity floor and the agent must ABSTAIN. Without this case a "
+                "retriever that always returns its k nearest rows scores identically to "
+                "one that knows when it has nothing — and the model answers confidently "
+                "from irrelevant excerpts. Guards config.retrieval_min_score.",
+    },
+    {
         "id": "general_concept",
         "question": "What is VRR and why does it matter?",
         "pattern": None, "date": None,
