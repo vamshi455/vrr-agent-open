@@ -80,10 +80,10 @@ export function ReportView({ patternId, period, trend }: Props) {
   return (
     <div className="space-y-4">
       <header>
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-title font-semibold">
           {ctx.pattern_name} — VRR {fmt.vrr(sel.vrr)} on {fmt.month(period)}
         </h1>
-        <p className="mt-0.5 text-xs text-slate-500">
+        <p className="mt-0.5 text-label text-slate-500">
           id_pattern <code className="font-mono">{ctx.pattern_id}</code>
           {ctx.asset && <> · asset {ctx.asset}</>}
         </p>
@@ -155,14 +155,14 @@ export function ReportView({ patternId, period, trend }: Props) {
         sub="Exact log-mean (LMDI) split — the contributions sum to ΔVRR, to machine precision."
       >
         {!prev ? (
-          <p className="text-sm text-slate-500">No prior period to attribute against.</p>
+          <p className="text-body text-slate-500">No prior period to attribute against.</p>
         ) : !dec ? (
           <Spinner label="decomposing…" />
         ) : !dec.ok ? (
-          <p className="text-sm text-slate-500">{dec.reason ?? "no attribution"}</p>
+          <p className="text-body text-slate-500">{dec.reason ?? "no attribution"}</p>
         ) : (
           <div className="grid grid-cols-5 gap-4">
-            <div className="col-span-2 text-sm">
+            <div className="col-span-2 text-body">
               <p className="font-medium">
                 {fmt.month(prev.vrr_date)} → {fmt.month(period)}
               </p>
@@ -170,11 +170,11 @@ export function ReportView({ patternId, period, trend }: Props) {
                 VRR {fmt.vrr(dec.vrr_a)} → {fmt.vrr(dec.vrr_b)}{" "}
                 (<strong>{fmt.signed(dec.d_vrr, 3)}</strong>)
               </p>
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-label text-slate-500">
                 Injection side {fmt.signed(dec.side_contributions.injection)} · production
                 side {fmt.signed(dec.side_contributions.production)}
               </p>
-              <ul className="mt-3 space-y-1 text-xs tabular-nums">
+              <ul className="mt-3 space-y-1 text-label tabular-nums">
                 {dec.drivers.map((d) => (
                   <li key={d.term} className="flex justify-between gap-3">
                     <span className="text-slate-600">{d.label}</span>
@@ -211,10 +211,10 @@ export function ReportView({ patternId, period, trend }: Props) {
         {!analysis ? (
           <Spinner label="running verify → attribute → classify → propose…" />
         ) : !analysis.ok ? (
-          <p className="text-sm text-slate-500">{analysis.reason}</p>
+          <p className="text-body text-slate-500">{analysis.reason}</p>
         ) : (
           <>
-            <pre className="whitespace-pre-wrap rounded bg-slate-50 p-3 text-xs leading-relaxed text-slate-800">
+            <pre className="whitespace-pre-wrap rounded bg-slate-50 p-3 text-label leading-relaxed text-slate-800">
               {analysis.narrative}
             </pre>
             {analysis.draft ? (
@@ -222,12 +222,12 @@ export function ReportView({ patternId, period, trend }: Props) {
                 <button
                   onClick={submit}
                   disabled={busy || !!submitted}
-                  className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                  className="rounded bg-slate-900 px-3 py-1.5 text-body text-white disabled:opacity-40"
                 >
                   {busy ? "submitting…" : "📤 Submit to approval queue (draft → analyst)"}
                 </button>
                 {analysis.draft.action_type === "investigate_inputs" && (
-                  <p className="text-xs text-suspect">
+                  <p className="text-label text-suspect">
                     This draft is an <em>investigate inputs</em> item (suspect PVT), not a
                     valve change — it still routes through the same approval chain.
                   </p>
@@ -235,7 +235,7 @@ export function ReportView({ patternId, period, trend }: Props) {
                 {submitted && <Banner tone="good" title={submitted} />}
               </div>
             ) : (
-              <p className="mt-3 text-sm text-slate-500">
+              <p className="mt-3 text-body text-slate-500">
                 No anomaly fired for this period — nothing to draft.
               </p>
             )}

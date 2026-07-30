@@ -16,7 +16,9 @@ from fastapi import APIRouter, HTTPException, Query
 from ..agent import chat as CH
 from ..agent import history as HIST
 from ..agent import tools as T
+from ..agent import tracing as TRACING
 from .auth import CurrentUser
+from .db import execute, query
 from .schemas import ChatRequest
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -36,6 +38,14 @@ def ask(body: ChatRequest, user: CurrentUser) -> dict:
     except Exception as exc:                    # a tool/DB failure is a 502, not a crash
         raise HTTPException(502, f"agent failed: {exc}") from exc
 
+    # Tracing is meant to be ON at all times, so the id travels back with the answer and
+    # the UI can link straight to it. `recheck()` picks MLflow back up if it was down
+    # when this process started — otherwise a restarted MLflow stays invisible until the
+    # API restarts too, which is how a run goes silently untraced.
+    if not TRACING.enabled():
+        TRACING.recheck()
+    trace_id = TRACING.last_trace_id()
+
     saved = False
     if body.persist and body.pattern:
         try:
@@ -47,14 +57,59 @@ def ask(body: ChatRequest, user: CurrentUser) -> dict:
             saved = True
         except Exception:
             saved = False                       # the answer still stands; only durability is lost
-    return {**result, "persisted": saved}
+    return {**result, "persisted": saved, "trace_id": trace_id,
+            "trace_url": TRACING.trace_url(trace_id),
+            "traced": bool(trace_id)}
+
+
+_CLEAR_DDL = """
+CREATE TABLE IF NOT EXISTS vrr_agent.chat_clear (
+  username text NOT NULL, id_pattern text NOT NULL,
+  cleared_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (username, id_pattern))
+"""
+
+
+def _cleared_before(username: str, pattern: str):
+    """This user's personal cutoff for this pattern, or None."""
+    try:
+        execute(_CLEAR_DDL, {})
+        rows = query("SELECT cleared_at FROM vrr_agent.chat_clear"
+                     " WHERE username=%(u)s AND id_pattern=%(p)s",
+                     {"u": username, "p": pattern})
+        return rows[0]["cleared_at"] if rows else None
+    except Exception:
+        return None
 
 
 @router.get("/chat/history")
-def history(pattern: str = Query(...), limit: int = Query(50, le=200)) -> list[dict]:
-    """This pattern's transcript, oldest first — shared across users, survives a refresh."""
+def history(pattern: str = Query(...), limit: int = Query(50, le=200),
+            user: str | None = Query(None)) -> list[dict]:
+    """This pattern's transcript, oldest first — shared, and it survives a refresh.
+
+    Filtered by the caller's personal `cleared_at` cutoff when they have one. The rows
+    themselves are never touched: the transcript is an audit record and the traces behind
+    it are the evidence, so "clear" means "stop showing me this", not "delete it".
+    """
     try:
         HIST.ensure_table()
-        return HIST.recent(pattern, limit=limit)
+        since = _cleared_before(user, pattern) if user else None
+        return HIST.recent(pattern, limit=limit, since=since)
     except Exception:
         return []                               # no table yet is empty, not an error
+
+
+@router.post("/chat/clear")
+def clear(user: CurrentUser, pattern: str = Query(...)) -> dict:
+    """Hide this pattern's transcript FOR THIS USER from now on.
+
+    Records a cutoff; deletes nothing. Everyone else still sees the full history, the
+    rows stay in `vrr_agent.chat_history`, and every turn remains in MLflow as a trace.
+    """
+    execute(_CLEAR_DDL, {})
+    execute("INSERT INTO vrr_agent.chat_clear (username, id_pattern) VALUES (%(u)s, %(p)s)"
+            " ON CONFLICT (username, id_pattern)"
+            " DO UPDATE SET cleared_at = now()",
+            {"u": user["username"], "p": pattern})
+    return {"cleared_for": user["username"], "pattern": pattern,
+            "note": "hidden for you only — rows and traces are retained"}

@@ -38,10 +38,10 @@ export function LineageView({ patternId, period }: Props) {
   return (
     <div className="space-y-4">
       <header>
-        <h1 className="text-lg font-semibold">
+        <h1 className="text-title font-semibold">
           How the {fmt.month(period)} VRR was computed
         </h1>
-        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
+        <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
           Recomputed independently in this request from{" "}
           <code className="font-mono">{audit.provenance?.recomputed_from?.join("`, `")}</code>{" "}
           via <code className="font-mono">{audit.provenance?.code}</code> — not read back
@@ -60,7 +60,7 @@ export function LineageView({ patternId, period }: Props) {
                     tone={audit.matches ? "good" : "bad"}
                     foot={audit.matches ? "✅ verified" : "⚠️ mismatch"} />
           </div>
-          <p className="text-xs text-slate-500">
+          <p className="text-label text-slate-500">
             PVT lookup methods in this period:{" "}
             {audit.pvt_methods.map((m) => (
               <span key={m} className="mr-1">
@@ -76,7 +76,7 @@ export function LineageView({ patternId, period }: Props) {
       )}
 
       <Card title="Derivation chain">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        <div className="flex flex-wrap items-center gap-2 text-label">
           {chain.map((s, i) => (
             <span key={s} className="flex items-center gap-2">
               <code className="rounded bg-slate-100 px-2 py-1 font-mono">{s}</code>
@@ -87,7 +87,7 @@ export function LineageView({ patternId, period }: Props) {
       </Card>
 
       <Card title="Formulas" sub="core.physics — the same code the recompute above ran.">
-        <table className="w-full text-xs">
+        <table className="w-full text-label">
           <tbody>
             {Object.entries(lin.formulas).map(([term, f]) => (
               <tr key={term} className="border-b border-slate-100 last:border-0">
@@ -113,7 +113,7 @@ export function LineageView({ patternId, period }: Props) {
           inj_res_bbl: lin.recomputed_from_terms.inj_res_bbl,
           vrr: lin.recomputed_from_terms.vrr,
         }]} />
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mt-2 text-label text-slate-500">
           Unity Catalog OSS registers these tables as the catalog-of-record, so this chain
           is also visible as table-level lineage (<code className="font-mono">make register</code>).
         </p>

@@ -193,3 +193,75 @@ def test_reads_need_no_token_but_writes_do(anon, monkeypatch):
     assert anon.get("/api/patterns").status_code == 200
     assert anon.post("/api/queue/ACT-1/advance").status_code == 401
     assert anon.post("/api/chat", json={"question": "hi"}).status_code == 401
+
+
+# --------------------------------------------------- the board + clearing chat ----
+def test_board_returns_every_lane_including_the_empty_ones(client, monkeypatch):
+    """The swim-lane view must render a lane per stage even when nothing sits in it —
+    an absent 'rejected' column is not the same as an empty one."""
+    monkeypatch.setattr(RA, "query", lambda sql, p=None: [
+        {**DRAFT, "stage": "draft"}, {**DRAFT, "action_id": "ACT-2", "stage": "executed"}])
+
+    body = client.get("/api/board").json()
+
+    assert body["order"] == ["draft", "analyst", "rm", "site", "executed", "rejected"]
+    assert set(body["lanes"]) == set(body["order"])          # every lane present
+    assert body["counts"]["draft"] == 1
+    assert body["counts"]["rejected"] == 0
+    assert body["approver_for_stage"]["site"] == "site"
+
+
+def test_clearing_chat_hides_it_without_deleting_anything(client, monkeypatch):
+    """'Clear' is a per-user cutoff, not a delete: the transcript is an audit record and
+    the traces behind it are the evidence."""
+    statements = []
+    monkeypatch.setattr(RC, "execute", lambda sql, p: statements.append(sql))
+
+    body = client.post("/api/chat/clear", params={"pattern": PATTERN}).json()
+
+    assert body["cleared_for"] == "analyst.demo"
+    joined = " ".join(statements).lower()
+    assert "insert into vrr_agent.chat_clear" in joined
+    assert "delete" not in joined                            # nothing is removed
+
+
+def test_history_respects_that_users_personal_cutoff(client, monkeypatch):
+    """One user clearing must not blank the shared transcript for everyone else."""
+    seen = {}
+    monkeypatch.setattr(RC, "execute", lambda sql, p: None)
+    monkeypatch.setattr(RC, "query", lambda sql, p=None: [{"cleared_at": "2026-07-30"}])
+    monkeypatch.setattr(RC.HIST, "ensure_table", lambda: None)
+    monkeypatch.setattr(RC.HIST, "recent",
+                        lambda p, limit, since: seen.update(since=since) or [])
+
+    client.get("/api/chat/history", params={"pattern": PATTERN, "user": "analyst.demo"})
+    assert seen["since"] == "2026-07-30"                     # filtered for this user
+
+    client.get("/api/chat/history", params={"pattern": PATTERN})
+    assert seen["since"] is None                             # unfiltered for everyone else
+
+
+def test_chat_answer_carries_its_trace_id(client, monkeypatch):
+    """Tracing is meant to be on always, so the id travels with the answer and the UI
+    can link to the span tree instead of hunting by timestamp."""
+    monkeypatch.setattr(RC.CH, "respond", lambda *a, **k: {"text": "ok", "meta": {}})
+    monkeypatch.setattr(RC.TRACING, "enabled", lambda: True)
+    monkeypatch.setattr(RC.TRACING, "last_trace_id", lambda: "tr-abc123")
+    monkeypatch.setattr(RC.TRACING, "trace_url", lambda t: f"http://mlflow/{t}")
+
+    body = client.post("/api/chat", json={"question": "why?", "persist": False}).json()
+
+    assert body["traced"] is True
+    assert body["trace_id"] == "tr-abc123"
+    assert body["trace_url"].endswith("tr-abc123")
+
+
+def test_an_untraced_answer_says_so_rather_than_pretending(client, monkeypatch):
+    monkeypatch.setattr(RC.CH, "respond", lambda *a, **k: {"text": "ok", "meta": {}})
+    monkeypatch.setattr(RC.TRACING, "enabled", lambda: False)
+    monkeypatch.setattr(RC.TRACING, "recheck", lambda: False)
+    monkeypatch.setattr(RC.TRACING, "last_trace_id", lambda: None)
+
+    body = client.post("/api/chat", json={"question": "why?", "persist": False}).json()
+
+    assert body["traced"] is False                           # surfaced, not swallowed

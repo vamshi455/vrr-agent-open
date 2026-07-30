@@ -13,11 +13,11 @@ export function Card({ title, sub, children, className = "" }: {
   title?: ReactNode; sub?: ReactNode; children: ReactNode; className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}>
+    <section className={`rounded-lg border border-slate-200 bg-white shadow-card ${className}`}>
       {(title || sub) && (
         <header className="border-b border-slate-100 px-4 py-3">
-          {title && <h2 className="text-sm font-semibold text-slate-800">{title}</h2>}
-          {sub && <p className="mt-0.5 text-xs leading-relaxed text-slate-500">{sub}</p>}
+          {title && <h2 className="text-sub font-semibold text-slate-800">{title}</h2>}
+          {sub && <p className="mt-0.5 text-micro leading-relaxed text-slate-500">{sub}</p>}
         </header>
       )}
       <div className="p-4">{children}</div>
@@ -33,10 +33,10 @@ export function Metric({ label, value, foot, tone = "plain" }: {
     plain: "text-slate-900", good: "text-signal", warn: "text-suspect", bad: "text-offtarget",
   }[tone];
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-semibold tabular-nums ${toneClass}`}>{value}</div>
-      {foot && <div className="mt-0.5 text-xs text-slate-500">{foot}</div>}
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-card">
+      <div className="text-micro font-medium uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`mt-1 text-display font-semibold tabular-nums ${toneClass}`}>{value}</div>
+      {foot && <div className="mt-0.5 text-micro text-slate-500">{foot}</div>}
     </div>
   );
 }
@@ -51,9 +51,9 @@ export function Banner({ tone, title, children }: {
     info: "border-slate-200 bg-slate-50 text-slate-700",
   }[tone];
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>
+    <div className={`rounded-lg border px-4 py-3 text-body ${styles}`}>
       <div className="font-medium">{title}</div>
-      {children && <div className="mt-1 text-xs leading-relaxed opacity-90">{children}</div>}
+      {children && <div className="mt-1 text-micro leading-relaxed opacity-90">{children}</div>}
     </div>
   );
 }
@@ -66,7 +66,7 @@ export function Badge({ children, tone = "slate" }: {
     amber: "bg-amber-100 text-amber-800", red: "bg-red-100 text-red-800",
   }[tone];
   return (
-    <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-medium ${styles}`}>
+    <span className={`inline-flex rounded px-1.5 py-0.5 text-micro font-medium ${styles}`}>
       {children}
     </span>
   );
@@ -74,7 +74,7 @@ export function Badge({ children, tone = "slate" }: {
 
 export function Spinner({ label = "loading…" }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 py-8 text-sm text-slate-500">
+    <div className="flex items-center gap-2 py-8 text-body text-slate-500">
       <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
       {label}
     </div>
@@ -95,11 +95,11 @@ export function ErrorNote({ error }: { error: unknown }) {
 export function DataTable({ rows, max = 400 }: {
   rows: Record<string, unknown>[]; max?: number;
 }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No rows.</p>;
+  if (!rows.length) return <p className="text-body text-slate-500">No rows.</p>;
   const cols = Object.keys(rows[0]);
   return (
     <div className="overflow-auto rounded border border-slate-200" style={{ maxHeight: max }}>
-      <table className="w-full text-xs">
+      <table className="w-full text-label">
         <thead className="sticky top-0 bg-slate-50 text-left text-slate-600">
           <tr>
             {cols.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1.5 font-medium">{c}</th>)}

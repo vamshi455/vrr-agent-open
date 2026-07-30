@@ -45,6 +45,24 @@ def stages() -> dict:
             "approver_for_stage": APPROVER_FOR_STAGE}
 
 
+@router.get("/board")
+def board() -> dict:
+    """Every lane at once — what the swim-lane view renders.
+
+    One query rather than six: the board is a single picture of where work is stuck, and
+    six round trips would let the lanes disagree with each other mid-render.
+    """
+    rows = query("SELECT * FROM vrr_agent.action_queue"
+                 " ORDER BY severity, created_at DESC")
+    lanes: dict[str, list[dict]] = {s: [] for s in [*AP.STAGES, "rejected"]}
+    for r in rows:
+        lanes.setdefault(r["stage"], []).append(r)
+    return {"lanes": lanes,
+            "counts": {k: len(v) for k, v in lanes.items()},
+            "approver_for_stage": APPROVER_FOR_STAGE,
+            "order": [*AP.STAGES, "rejected"]}
+
+
 @router.get("/queue")
 def queue(stage: str = Query("draft")) -> list[dict]:
     return query("SELECT * FROM vrr_agent.action_queue WHERE stage=%(s)s "

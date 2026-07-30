@@ -56,6 +56,42 @@ def enabled() -> bool:
     return _enabled
 
 
+def last_trace_id() -> str | None:
+    """The id of the trace just finished, so the API can hand the UI a deep link.
+
+    An answer you cannot find in MLflow is an answer you cannot audit, so the id travels
+    with the response rather than being something you go hunting for by timestamp.
+    """
+    if not _enabled:
+        return None
+    try:
+        return _mlflow.get_last_active_trace_id()
+    except Exception:
+        return None
+
+
+def trace_url(trace_id: str | None) -> str | None:
+    if not (_enabled and trace_id):
+        return None
+    return f"{CFG.mlflow_uri}/#/experiments/{_experiment_id()}/traces?selectedTraceId={trace_id}"
+
+
+def _experiment_id() -> str:
+    try:
+        exp = _mlflow.get_experiment_by_name(EXPERIMENT)
+        return exp.experiment_id if exp else "0"
+    except Exception:
+        return "0"
+
+
+def recheck() -> bool:
+    """Re-probe MLflow. Tracing is meant to be on ALWAYS; when the server was down at
+    import we must be able to notice it came back without restarting the API."""
+    global _enabled
+    _probe()
+    return _enabled
+
+
 def status() -> str:
     return (f"🟢 tracing → {CFG.mlflow_uri} ({EXPERIMENT})" if _enabled
             else "⚪ tracing off (no MLflow server at " + CFG.mlflow_uri + ")")

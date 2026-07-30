@@ -228,6 +228,11 @@ export interface ChatAnswer {
   meta: ChatMeta;
   data?: unknown;
   persisted?: boolean;
+  /** Tracing is meant to be on always; these say whether this turn actually landed
+   *  in MLflow, and link straight to its span tree. */
+  trace_id?: string | null;
+  trace_url?: string | null;
+  traced?: boolean;
 }
 
 export interface HistoryTurn {
@@ -249,6 +254,14 @@ export interface Health {
   postgres: { host: string; monthly_rows: number };
   knowledge: { docs: number; chunks: number };
   retrieval_min_score: number;
+}
+
+/** Every lane at once — the swim-lane board reads this in one call. */
+export interface Board {
+  lanes: Record<string, QueueItem[]>;
+  counts: Record<string, number>;
+  approver_for_stage: Record<string, string>;
+  order: string[];
 }
 
 export interface Stages {
@@ -306,6 +319,7 @@ export const api = {
     post<{ action_id: string; next_approver: string }>(`/patterns/${id}/submit`, { date }),
 
   queue: (stage: string) => get<QueueItem[]>("/queue", { stage }),
+  board: () => get<Board>("/board"),
   adjustments: () => get<Adjustment[]>("/adjustments"),
   advance: (actionId: string) =>
     post<{ from: string; to: string; by: string; wrote_adjustment_history: boolean }>(
@@ -315,5 +329,10 @@ export const api = {
 
   chat: (body: { question: string; pattern?: string; date?: string; agentic?: boolean }) =>
     post<ChatAnswer>("/chat", body),
-  history: (pattern: string) => get<HistoryTurn[]>("/chat/history", { pattern }),
+  history: (pattern: string, user?: string) =>
+    get<HistoryTurn[]>("/chat/history", { pattern, user }),
+  /** Hides the transcript for THIS user. Deletes nothing — the rows and the traces
+   *  behind them are the audit record. */
+  clearChat: (pattern: string) =>
+    post<{ cleared_for: string; note: string }>(`/chat/clear?pattern=${pattern}`, undefined),
 };

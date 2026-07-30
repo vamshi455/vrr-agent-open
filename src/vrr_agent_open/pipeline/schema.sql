@@ -283,3 +283,12 @@ CREATE TABLE IF NOT EXISTS vrr_agent.app_user (
   created_at timestamptz DEFAULT now(),
   last_login timestamptz
 );
+
+-- Per-user "clear my chat" cutoffs. Clearing hides the transcript FOR THAT USER from
+-- this timestamp back; the chat_history rows are never touched and every turn stays in
+-- MLflow as a trace. An audit trail a user can erase from the UI is not an audit trail.
+CREATE TABLE IF NOT EXISTS vrr_agent.chat_clear (
+  username text NOT NULL, id_pattern text NOT NULL,
+  cleared_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (username, id_pattern)
+);

@@ -9,7 +9,7 @@
 ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688)
 ![React](https://img.shields.io/badge/ui-React%20%2B%20Vite%20%2B%20TS-61DAFB)
 ![MLflow](https://img.shields.io/badge/tracing%20%2B%20eval-MLflow%20OSS-0194E2)
-![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-159%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
 An open-source port of a Databricks VRR agent. Same trust model — **the LLM never

@@ -41,8 +41,8 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
   return (
     <div className="space-y-4">
       <header>
-        <h1 className="text-lg font-semibold">Portfolio — where to look first</h1>
-        <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-500">
+        <h1 className="text-title font-semibold">Portfolio — where to look first</h1>
+        <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
           Every pattern's latest VRR against its target, ranked by absolute drift
           (<code className="font-mono">VRR_OVERVIEW</code> over{" "}
           <code className="font-mono">vrr_curated.pattern_vrr</code>). Amber = built on
@@ -53,14 +53,14 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
 
       <div className="flex items-center gap-3">
         <select
-          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-body"
           value={asset}
           onChange={(e) => setAsset(e.target.value)}
         >
           {["all assets", ...assets].map((a) => <option key={a}>{a}</option>)}
         </select>
         {Object.keys(audits).length > 0 && (
-          <p className="text-xs text-slate-500">
+          <p className="text-label text-slate-500">
             Input-audit verdicts:{" "}
             {Object.entries(audits).map(([k, v]) => (
               <span key={k} className="mr-2">
@@ -122,12 +122,12 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
         }
       >
         {!showDq ? (
-          <p className="text-xs text-slate-500">
+          <p className="text-label text-slate-500">
             {dq?.ok ? `All ${dq.checks_run.length} checks clean.`
                     : `${dq?.n_findings ?? "—"} finding(s).`} Click to expand.
           </p>
         ) : dq?.ok ? (
-          <p className="text-sm text-signal">
+          <p className="text-body text-signal">
             All {dq.checks_run.length} checks clean — allocation sums ≤ 1, no orphan
             volumes, every pattern has pressure, every allocated completion has PVT.
           </p>
@@ -135,7 +135,7 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
           <div className="space-y-3">
             {Object.entries(dq?.findings ?? {}).map(([name, rows]) => (
               <div key={name}>
-                <p className="mb-1 text-xs font-medium text-suspect">
+                <p className="mb-1 text-label font-medium text-suspect">
                   {name} — {rows.length} row(s)
                 </p>
                 <DataTable rows={rows} max={200} />

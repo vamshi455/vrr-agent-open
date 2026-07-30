@@ -12,8 +12,12 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - **LangGraph** — the agent tool-loop + faithfulness-gate node (replaces Mosaic ChatAgent)
 - **Unity Catalog OSS** — governance catalog-of-record (RBAC + lineage; NOT a query engine)
 - **MLflow OSS** — tracing / eval / registry
-- **FastAPI + React** (Vite · TypeScript · Tailwind) — the workbench: 4 views + a docked
-  chat drawer over a 22-endpoint API. Streamlit was retired 2026-07-30.
+- **FastAPI + React** (Vite · TypeScript · Tailwind) — the workbench, branded as the
+  fictional operator **Meridian Petroleum**: header with identity top-right, 4 views
+  (Portfolio · Report · Lineage · **swim-lane approval board**) and a floating chatbot,
+  over a 24-endpoint API. One type scale (`micro/label/body/sub/title/display`) and one
+  semantic palette (signal/suspect/offtarget + a hue per approval stage) — no ad-hoc
+  `text-[11px]`. Streamlit was retired 2026-07-30.
 - **OAuth2 password grant + JWT bearer** (`api/auth.py`, since 2026-07-30) — writes and
   `POST /chat` need a token; reads stay public. **The role is a signed claim, never a
   request field** (an earlier cut trusted the body, which meant the caller picked its own
@@ -33,7 +37,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 
 ## Current status (2026-07-24)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **154 tests pass**
+  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **159 tests pass**
   (`pytest -q`, no stack needed — incl. `tests/test_graph.py`, which walks every path
   through the LangGraph loop with the model and Postgres stubbed).
 - ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
