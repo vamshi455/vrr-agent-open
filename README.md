@@ -749,9 +749,9 @@ sequenceDiagram
 
     Note over B,A: the browser and the LLM call the SAME tool,<br/>so a chart and an answer cannot disagree
 
-    B->>A: POST /api/queue/{id}/advance {role: "rm"}
-    A->>A: stage 'draft' needs ANALYST
-    A-->>B: 403 — refused server-side
+    B->>A: POST /api/queue/{id}/advance<br/>Authorization: Bearer …
+    A->>A: role comes from the verified token,<br/>checked against the stage
+    A-->>B: 403 if it is not that stage's role
 ```
 
 **The endpoints** (full OpenAPI at `:8000/docs`):
@@ -768,9 +768,9 @@ sequenceDiagram
 1. **No endpoint computes.** Reads are pass-throughs to `agent/tools.py`, provenance keys
    and all. A test asserts the payload comes back *verbatim* — the moment the API
    reshapes a tool result, the number on screen stops being the number the tool produced.
-2. **Guardrails are server-side.** Role checks, terminal-stage refusals, and the
-   adjustment-history write all live in `routes_approvals.py`. Verified live: `rm`
-   posting an advance on a `draft` gets **403**; `analyst` gets **200**.
+2. **Guardrails are server-side.** Role checks, terminal-stage refusals and the
+   adjustment-history write all live in `routes_approvals.py`, and the role they check
+   is the one in the caller's verified token — see [§12c](#12c-authentication--oauth2-password-grant--jwt-bearer).
 3. **`adjustment_history` is written before the stage moves.** An executed item with no
    history row would silently never be learned from by the ρ loop.
 
@@ -790,85 +790,137 @@ Computed from your tables · qwen2.5:7b phrasing · ✅ gate passed after one re
 
 ---
 
-## 12c. API security — OAuth2 password grant + JWT bearer
+## 12c. Authentication — OAuth2 password grant + JWT bearer
 
-The approval chain is a chain of *people*, so who you are cannot be something you say.
-This is the third version of that check, and the first one that holds:
+The approval chain is a chain of *people*: a draft moves analyst → RM → site, and only
+the site engineer may execute. That only means something if the server — not the client
+— decides who you are. So **identity is a signed token claim**, established at login and
+verified on every protected call.
 
-| | Where the role came from | The attack |
-|---|---|---|
-| Streamlit | the button was hidden | POST the transition anyway |
-| FastAPI v1 | the **request body** | `curl -d '{"role":"site"}'` executed a valve change |
-| **now** | a **signed JWT claim** | none — the body no longer carries a role at all |
+### Signing in
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant B as Browser
+    participant U as Analyst
+    participant W as Workbench (React)
     participant A as FastAPI
     participant DB as vrr_agent.app_user
 
-    B->>A: POST /api/auth/token (username, password)
-    A->>DB: SELECT password_hash, role
-    A->>A: bcrypt.checkpw
-    A-->>B: JWT { sub, role, exp } signed HS256
-
-    B->>A: POST /api/queue/{id}/advance<br/>Authorization: Bearer …
-    A->>A: verify signature + expiry → claims.role
-    A->>A: stage 'rm' requires 'site'
-    alt claim says site
-        A->>DB: write adjustment_history, advance stage
-        A-->>B: 200 { by: "site.demo" }
-    else claim says anything else
-        A-->>B: 403 — and the body cannot argue
+    U->>W: username + password
+    W->>A: POST /api/auth/token (form-encoded)
+    A->>DB: look up the account
+    DB-->>A: password hash + role + active flag
+    A->>A: verify hash · check the account is active
+    alt credentials good
+        A-->>W: signed token { subject, role, expiry }
+        W->>W: keep it for the session
+        W->>A: GET /api/auth/me
+        A-->>W: who you are — the sidebar shows this
+    else credentials bad
+        A-->>W: 401 (same message either way)
     end
 ```
 
-**Verified against the running server**, not just in tests:
+The failure message is identical whether the account does not exist or the password is
+wrong: a login that distinguishes them tells a stranger which usernames are real.
 
+### Making a request
+
+```mermaid
+flowchart TB
+    REQ["request from the workbench"] --> KIND{"read or write?"}
+    KIND -->|"read: portfolio, trend,<br/>attribution, lineage, audit"| SERVE["served — no account needed"]
+    KIND -->|"write, or ask the agent"| TOK{"valid token?"}
+    TOK -->|"missing, expired,<br/>or not ours"| R401["401 — sign in"]
+    TOK -->|"valid"| ROLE{"does the claimed role<br/>own this step?"}
+    ROLE -->|"no"| R403["403 — refused, and the<br/>request body cannot argue"]
+    ROLE -->|"yes"| DO["perform it, recording the<br/>token's subject as the actor"]
+
+    style SERVE fill:#e6f4ea,stroke:#34a853
+    style DO fill:#e6f4ea,stroke:#34a853
+    style R401 fill:#fce8e6,stroke:#ea4335
+    style R403 fill:#fce8e6,stroke:#ea4335
 ```
-analyst token + body {"role":"site"}  → 403  stage 'rm' advances on site sign-off;
-                                             you are signed in as 'analyst.demo' (analyst)
-token forged with a guessed secret    → 401  invalid token: Signature verification failed
-no token at all                       → 401  not authenticated
-the real site.demo token              → 200  { to: "executed", by: "site.demo" }
-adjustment_history.approved_by        → site.demo   ← from the token, not a form field
+
+Two things fall out of that shape:
+
+- **The role is never read from the request.** It is a claim inside the token, checked
+  against the stage the item currently sits at. Hiding a button in the UI is convenience;
+  the refusal is the control.
+- **The actor on the audit trail is the token's subject.** `action_queue.stage_by` and
+  `adjustment_history.approved_by` record who the server authenticated — the ρ learning
+  loop and any later review read a name that was proven, not typed.
+
+### What needs an account
+
+| | Needs a token | Why |
+|---|---|---|
+| Portfolio, trend, attribution, lineage, audit, health | no | reading is how you evaluate the tool; a fresh clone should just work |
+| Ask the agent (`/chat`) | **yes** | it spends real compute |
+| Draft a change, advance, reject | **yes** | these move a valve change toward execution |
+
+### Roles
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft: agent raises it
+    draft --> analyst: analyst signs off
+    analyst --> rm: RM signs off
+    rm --> site: site signs off
+    site --> executed: site executes
+    executed --> [*]
+
+    note right of site
+        Each arrow needs an account
+        holding THAT role. Signing in
+        as one role cannot perform
+        another role's step.
+    end note
 ```
 
-**What is protected:** writes (`submit`, `advance`, `reject`) and `POST /chat` — the last
-because it spends real compute. Reads stay public, so the workbench still loads and you
-can study the portfolio, the attribution and the lineage without an account. You sign in
-to *act*.
-
-**Setup:**
+### Setting it up
 
 ```bash
-make users                    # creates vrr_agent.app_user, seeds analyst/rm/site/steward
-make users p=something-else   # …with a password of your choosing
+make users                          # creates the account table and seeds one demo
+                                    # account per role, with hashed passwords
+make users p=<your-password>        # …choosing the password instead of the default
 ```
 
-Then set a stable signing key in `.env`, or every restart invalidates every token:
+Set a signing key in `.env` before real use — without one the API generates a throwaway
+key per process, so sessions end at every restart and it says so loudly at startup:
 
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # → VRR_JWT_SECRET
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # → VRR_JWT_SECRET in .env
 ```
 
-**The limits, stated rather than implied:**
+`.env` is gitignored. No credential or key is committed, and none has a default baked
+into the source — a well-known signing key in a public repo would look like security
+while providing none.
 
-- **No revocation list.** A stolen token is valid until it expires (12 h default).
-  Deactivating a user blocks the next *login*, not an issued token — the standard
-  stateless-JWT trade.
-- **Token in `localStorage`**, so an XSS bug leaks it. An httpOnly cookie is immune but
-  needs CSRF protection; for a workbench on your own machine the trade is fine, on a
-  shared deployment it is not.
-- **No refresh tokens, no rotation.** You sign in again after 12 h.
-- **HS256 with one shared secret.** Anyone holding it can mint a token for any role.
-  Real SSO would verify RS256 against an IdP's JWKS — the same `current_user` dependency,
-  a different verify step, nothing downstream changes.
+### Before exposing this beyond localhost
 
-`tests/test_auth.py` is the security claim written as things an attacker tries: forged
-signature, expired token, missing role claim, a body that says `"role": "site"`, an
-analyst trying to execute, a deactivated account.
+The defaults suit a workbench you run on your own machine. Moving it anywhere shared is
+a deliberate step with a checklist, not a copy of this configuration:
+
+1. **Change the seeded accounts** — `make users p=…`, or create real ones and remove the
+   demos. Treat the shipped defaults as placeholders, not accounts.
+2. **Set `VRR_JWT_SECRET`** to a value generated as above, hold it like a password, and
+   rotate it if it is ever shared. Rotating invalidates existing sessions by design.
+3. **Terminate TLS in front of the API.** Bearer tokens over plain HTTP are readable in
+   transit; nothing in the application layer compensates for that.
+4. **Shorten `VRR_JWT_TTL_MINUTES`** from the 12-hour default to match how long a session
+   should reasonably live, since sessions end by expiry rather than by revocation.
+5. **Decide where the token lives.** The browser build keeps it in web storage, which is
+   the usual trade for a single-page app; a deployment with stricter requirements should
+   move it to an httpOnly cookie and add CSRF protection.
+6. **Point at your identity provider** if you have one. The verification step is one
+   function — `current_user` in `api/auth.py` — and swapping local signing for an IdP's
+   published keys changes nothing downstream of it.
+
+`tests/test_auth.py` covers this layer as a set of adversarial cases — tampered tokens,
+expired tokens, missing claims, and a caller trying to act above its role — so a
+regression in any of them fails the suite rather than reaching a review.
 
 ---
 

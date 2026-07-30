@@ -5,8 +5,12 @@
  * portfolio, the attribution and the lineage without an account. You sign in to *act* —
  * ask the agent, draft a change, move it along the approval chain.
  *
- * The role you get is the role your account has. That is the whole point of this screen:
- * the previous build let you pick "site" from a dropdown and execute a valve change.
+ * The role you get is the role your account has — you cannot choose it here, which is
+ * the point of the screen existing at all.
+ *
+ * The account hints below name the demo USERNAMES only. A password rendered in the login
+ * page would be published by every deployment of it; `make users` prints the one it set,
+ * which is a place only the operator sees.
  */
 import { useState } from "react";
 import { api, type Identity } from "../api";
@@ -97,8 +101,8 @@ export function Login({ onSignedIn, onCancel, reason }: {
             ))}
           </ul>
           <p className="mt-2 text-[11px] text-slate-400">
-            Seed them with <code className="font-mono">make users</code>; the default
-            password is <code className="font-mono">vrr-demo</code>.
+            Seed them with <code className="font-mono">make users</code>, which prints the
+            password it set.
           </p>
         </div>
       </form>
