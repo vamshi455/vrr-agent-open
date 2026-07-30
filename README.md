@@ -9,7 +9,7 @@
 ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688)
 ![React](https://img.shields.io/badge/ui-React%20%2B%20Vite%20%2B%20TS-61DAFB)
 ![MLflow](https://img.shields.io/badge/tracing%20%2B%20eval-MLflow%20OSS-0194E2)
-![Tests](https://img.shields.io/badge/tests-129%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-154%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
 An open-source port of a Databricks VRR agent. Same trust model — **the LLM never
@@ -42,6 +42,7 @@ learned per-pattern response factor ρ — rebuilt on a free local stack.
 | [11. Observability](#11-observability--the-trace-span-tree) | the MLflow span tree |
 | [12. Governance](#12-governance--unity-catalog-as-catalog-of-record) | Unity Catalog, honestly |
 | [12b. The workbench](#12b-the-workbench--react-over-fastapi) | React over FastAPI, and why the split |
+| [12c. API security](#12c-api-security--oauth2-password-grant--jwt-bearer) | OAuth2 + JWT, and what it does not cover |
 | [13. Run it](#13-run-it) | every make target |
 | [14. Repo layout](#14-repository-layout) | where everything lives |
 | [15. Status](#15-status--what-is-real-and-what-is-not) | what is real, what is not |
@@ -107,7 +108,7 @@ flowchart TB
         DRAWER["💬 Chat drawer, docked right of every view<br/>transcript in vrr_agent.chat_history"]
     end
 
-    subgraph APIL["🌐 FastAPI (api/) — 20 endpoints"]
+    subgraph APIL["🌐 FastAPI (api/) — 22 endpoints"]
         RP["routes_patterns — reads, pass-through to tools"]
         RA["routes_approvals — role checks ENFORCED here"]
         RC["routes_chat — one gated answer per request"]
@@ -789,6 +790,88 @@ Computed from your tables · qwen2.5:7b phrasing · ✅ gate passed after one re
 
 ---
 
+## 12c. API security — OAuth2 password grant + JWT bearer
+
+The approval chain is a chain of *people*, so who you are cannot be something you say.
+This is the third version of that check, and the first one that holds:
+
+| | Where the role came from | The attack |
+|---|---|---|
+| Streamlit | the button was hidden | POST the transition anyway |
+| FastAPI v1 | the **request body** | `curl -d '{"role":"site"}'` executed a valve change |
+| **now** | a **signed JWT claim** | none — the body no longer carries a role at all |
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser
+    participant A as FastAPI
+    participant DB as vrr_agent.app_user
+
+    B->>A: POST /api/auth/token (username, password)
+    A->>DB: SELECT password_hash, role
+    A->>A: bcrypt.checkpw
+    A-->>B: JWT { sub, role, exp } signed HS256
+
+    B->>A: POST /api/queue/{id}/advance<br/>Authorization: Bearer …
+    A->>A: verify signature + expiry → claims.role
+    A->>A: stage 'rm' requires 'site'
+    alt claim says site
+        A->>DB: write adjustment_history, advance stage
+        A-->>B: 200 { by: "site.demo" }
+    else claim says anything else
+        A-->>B: 403 — and the body cannot argue
+    end
+```
+
+**Verified against the running server**, not just in tests:
+
+```
+analyst token + body {"role":"site"}  → 403  stage 'rm' advances on site sign-off;
+                                             you are signed in as 'analyst.demo' (analyst)
+token forged with a guessed secret    → 401  invalid token: Signature verification failed
+no token at all                       → 401  not authenticated
+the real site.demo token              → 200  { to: "executed", by: "site.demo" }
+adjustment_history.approved_by        → site.demo   ← from the token, not a form field
+```
+
+**What is protected:** writes (`submit`, `advance`, `reject`) and `POST /chat` — the last
+because it spends real compute. Reads stay public, so the workbench still loads and you
+can study the portfolio, the attribution and the lineage without an account. You sign in
+to *act*.
+
+**Setup:**
+
+```bash
+make users                    # creates vrr_agent.app_user, seeds analyst/rm/site/steward
+make users p=something-else   # …with a password of your choosing
+```
+
+Then set a stable signing key in `.env`, or every restart invalidates every token:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # → VRR_JWT_SECRET
+```
+
+**The limits, stated rather than implied:**
+
+- **No revocation list.** A stolen token is valid until it expires (12 h default).
+  Deactivating a user blocks the next *login*, not an issued token — the standard
+  stateless-JWT trade.
+- **Token in `localStorage`**, so an XSS bug leaks it. An httpOnly cookie is immune but
+  needs CSRF protection; for a workbench on your own machine the trade is fine, on a
+  shared deployment it is not.
+- **No refresh tokens, no rotation.** You sign in again after 12 h.
+- **HS256 with one shared secret.** Anyone holding it can mint a token for any role.
+  Real SSO would verify RS256 against an IdP's JWKS — the same `current_user` dependency,
+  a different verify step, nothing downstream changes.
+
+`tests/test_auth.py` is the security claim written as things an attacker tries: forged
+signature, expired token, missing role claim, a body that says `"role": "site"`, an
+analyst trying to execute, a deactivated account.
+
+---
+
 ## 13. Run it
 
 ```bash
@@ -801,6 +884,7 @@ docker compose up -d        # postgres+pgvector · unitycatalog · mlflow
 make seed                   # synthetic VRR data; core.physics computes curated
 make build                  # rebuild vrr_curated from vrr_raw alone
 make queue                  # anomaly → action_queue drafts awaiting approval
+make users                  # seed the demo accounts (analyst/rm/site) — writes need a token
 make app                    # build the React UI and serve it from FastAPI on :8000
 
 # ---- developing the UI ------------------------------------------------------
@@ -895,7 +979,7 @@ vrr_agent_open/
 | Postgres schema + seed + build | ✅ verified end to end (272,880 contrib → 1,440 monthly rows) |
 | LangGraph agent + 15 tools | ✅ a real `StateGraph`; every path tested with the model stubbed |
 | Faithfulness gate | ✅ catches wrong drivers, wrong directions, uncited numbers |
-| React workbench + FastAPI | ✅ 4 views, docked chat, **role checks enforced server-side** (403-verified) |
+| React workbench + FastAPI | ✅ 4 views, docked chat, login, **roles from signed JWT claims** (403/401-verified live) |
 | RAG (load → chunk → embed → search) | ✅ 4 docs / 35 chunks ingested; chunking + floor both **measured** |
 | Abstention ("I don't know") | ✅ floor 0.62, model not called, guarded by an eval case |
 | Providers (Ollama / OpenAI / Anthropic) | 🔶 local verified; **hosted unverified — no API key on the dev machine** |

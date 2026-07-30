@@ -12,8 +12,10 @@
  * different months.
  */
 import { useEffect, useMemo, useState } from "react";
-import { api, type Health, type Pattern, type TrendRow } from "./api";
+import { api, onUnauthorized, session, type Health, type Identity, type Pattern,
+         type TrendRow } from "./api";
 import { ChatDrawer } from "./components/ChatDrawer";
+import { Login } from "./components/Login";
 import { Banner, Spinner } from "./components/ui";
 import { ApprovalView } from "./views/ApprovalView";
 import { LineageView } from "./views/LineageView";
@@ -28,16 +30,16 @@ const VIEWS = [
 ] as const;
 type ViewId = (typeof VIEWS)[number]["id"];
 
-const ROLES = ["analyst", "rm", "site"];
-
 export default function App() {
   const [view, setView] = useState<ViewId>("portfolio");
   const [patterns, setPatterns] = useState<Pattern[] | null>(null);
   const [patternId, setPatternId] = useState<string>("");
   const [trend, setTrend] = useState<TrendRow[]>([]);
   const [period, setPeriod] = useState<string>("");
-  const [role, setRole] = useState("analyst");
-  const [user, setUser] = useState("analyst.demo");
+  // Identity, not preference. `me` is null until you sign in; the role inside it is a
+  // signed claim from the server, which is why there is no longer a role dropdown.
+  const [me, setMe] = useState<Identity | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +64,16 @@ export default function App() {
     });
   }, [patternId]);
 
-  useEffect(() => setUser(`${role}.demo`), [role]);
+  // Resume a session across refreshes, and drop it the moment the server says the token
+  // is no longer good (expired, or signed with a key this process does not have).
+  useEffect(() => {
+    if (session.token) {
+      api.me().then((who) => setMe({ username: who.username, role: who.role }))
+              .catch(() => session.clear());
+    }
+    onUnauthorized.handler = () => { setMe(null); setLoginOpen(true); };
+    return () => { onUnauthorized.handler = null; };
+  }, []);
 
   // The chat's quick question needs to say "high" or "low" (the intent router keys on
   // those words), so the shell computes it once from the selected period.
@@ -94,7 +105,7 @@ export default function App() {
     );
   }
 
-  const shared = { patternId, period, trend, role, user };
+  const shared = { patternId, period, trend };
 
   return (
     // h-screen + overflow-hidden pins the shell to the viewport, so each of the three
@@ -134,20 +145,35 @@ export default function App() {
           ))}
         </select>
 
-        <label className="mt-4 block text-xs font-medium text-slate-600">Acting as</label>
-        <select
-          className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-          value={role}
-          onChange={(e) => setRole(e.target.value)}
-        >
-          {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-        </select>
-        <input
-          className="mt-2 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
-          value={user}
-          onChange={(e) => setUser(e.target.value)}
-          aria-label="Your name"
-        />
+        <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-2">
+          {me ? (
+            <>
+              <p className="text-xs font-medium text-slate-700">{me.username}</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                role <strong>{me.role}</strong> — from your token, not a setting
+              </p>
+              <button
+                onClick={() => { api.logout(); setMe(null); }}
+                className="mt-1.5 text-[11px] text-slate-500 underline"
+              >
+                sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-slate-600">Not signed in</p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Reading is open; asking the agent or approving needs an account.
+              </p>
+              <button
+                onClick={() => setLoginOpen(true)}
+                className="mt-1.5 rounded bg-slate-900 px-2 py-1 text-[11px] text-white"
+              >
+                Sign in
+              </button>
+            </>
+          )}
+        </div>
 
         <nav className="mt-6 space-y-1">
           {VIEWS.map((v) => (
@@ -196,7 +222,7 @@ export default function App() {
         {view === "portfolio" && <PortfolioView onPick={setPatternId} />}
         {view === "report" && <ReportView {...shared} />}
         {view === "lineage" && <LineageView {...shared} />}
-        {view === "approval" && <ApprovalView role={role} user={user} />}
+        {view === "approval" && <ApprovalView role={me?.role ?? ""} />}
       </main>
 
       {/* ------------------------------------------------------------ chat */}
@@ -204,12 +230,21 @@ export default function App() {
         patternId={patternId}
         patternName={sorted.find((p) => p.pattern_id === patternId)?.pattern_name ?? ""}
         period={period}
-        user={user}
+        user={me?.username ?? ""}
+        signedIn={!!me}
+        onNeedSignIn={() => setLoginOpen(true)}
         vsTarget={vsTarget}
         llmUp={!!health?.llm.available}
         open={drawerOpen}
         onToggle={() => setDrawerOpen((o) => !o)}
       />
+
+      {loginOpen && (
+        <Login
+          onSignedIn={(who) => { setMe(who); setLoginOpen(false); }}
+          onCancel={() => setLoginOpen(false)}
+        />
+      )}
     </div>
   );
 }

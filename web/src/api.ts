@@ -13,23 +13,63 @@
 
 const BASE = "/api";
 
+/**
+ * The bearer token, held in localStorage so a refresh does not sign you out.
+ *
+ * Honest limitation: localStorage is readable by any script on the page, so an XSS bug
+ * leaks the token. The alternative — an httpOnly cookie — is immune to that but needs
+ * CSRF protection, and for a workbench you run on your own machine the trade is fine.
+ * It would NOT be fine on a shared deployment; that is the point to switch.
+ */
+const TOKEN_KEY = "vrr.token";
+
+export const session = {
+  get token(): string | null {
+    return localStorage.getItem(TOKEN_KEY);
+  },
+  save(token: string) {
+    localStorage.setItem(TOKEN_KEY, token);
+  },
+  clear() {
+    localStorage.removeItem(TOKEN_KEY);
+  },
+};
+
+/** Fires when the server rejects our token, so the shell can show the login form. */
+export const onUnauthorized: { handler: (() => void) | null } = { handler: null };
+
+function authHeaders(): Record<string, string> {
+  const t = session.token;
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function get<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params ?? {})) if (v !== undefined) qs.set(k, v);
   const url = `${BASE}${path}${qs.toString() ? `?${qs}` : ""}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new ApiError(res.status, await detail(res), url);
+  const res = await fetch(url, { headers: authHeaders() });
+  if (!res.ok) throw await fail(res, url);
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new ApiError(res.status, await detail(res), path);
+  if (!res.ok) throw await fail(res, path);
   return res.json() as Promise<T>;
+}
+
+/** A 401 means the token is gone, expired or forged — drop it and ask for a new one. */
+async function fail(res: Response, path: string): Promise<ApiError> {
+  const err = new ApiError(res.status, await detail(res), path);
+  if (res.status === 401) {
+    session.clear();
+    onUnauthorized.handler?.();
+  }
+  return err;
 }
 
 async function detail(res: Response): Promise<string> {
@@ -202,6 +242,8 @@ export interface HistoryTurn {
 }
 
 export interface Health {
+  auth: { required_for: string[]; scheme: string; token_ttl_minutes: number;
+          ephemeral_secret: boolean };
   llm: { available: boolean; model: string | null; provider: string };
   tracing: { enabled: boolean; uri: string };
   postgres: { host: string; monthly_rows: number };
@@ -216,7 +258,29 @@ export interface Stages {
 }
 
 // ------------------------------------------------------------- endpoints ----
+export interface Identity {
+  username: string;
+  role: string;
+  full_name?: string | null;
+}
+
 export const api = {
+  /** OAuth2 password grant. Form-encoded, not JSON — that is what the spec (and
+   *  FastAPI's OAuth2PasswordRequestForm, and the /docs Authorize button) expects. */
+  async login(username: string, password: string): Promise<Identity> {
+    const res = await fetch(`${BASE}/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ username, password }),
+    });
+    if (!res.ok) throw new ApiError(res.status, await detail(res), "/auth/token");
+    const body = await res.json();
+    session.save(body.access_token);
+    return { username: body.username, role: body.role, full_name: body.full_name };
+  },
+  me: () => get<{ username: string; role: string; expires_at: number }>("/auth/me"),
+  logout: () => session.clear(),
+
   health: () => get<Health>("/health"),
   stages: () => get<Stages>("/stages"),
 
@@ -236,19 +300,20 @@ export const api = {
   audit: (id: string, date: string) => get<AuditResult>(`/patterns/${id}/audit`, { date }),
   lineage: (id: string, date: string) => get<Lineage>(`/patterns/${id}/lineage`, { date }),
   analysis: (id: string, date: string) => get<AnalysisCase>(`/patterns/${id}/analysis`, { date }),
-  submit: (id: string, date: string, submitted_by: string) =>
-    post<{ action_id: string; next_approver: string }>(`/patterns/${id}/submit`,
-      { date, submitted_by }),
+  // No submitted_by / role / user in any write: the server takes the actor from the
+  // token. A client-supplied identity on an audit trail is a signature anyone can forge.
+  submit: (id: string, date: string) =>
+    post<{ action_id: string; next_approver: string }>(`/patterns/${id}/submit`, { date }),
 
   queue: (stage: string) => get<QueueItem[]>("/queue", { stage }),
   adjustments: () => get<Adjustment[]>("/adjustments"),
-  advance: (actionId: string, role: string, user: string) =>
-    post<{ from: string; to: string; wrote_adjustment_history: boolean }>(
-      `/queue/${actionId}/advance`, { role, user }),
-  reject: (actionId: string, role: string, user: string) =>
-    post<{ to: string }>(`/queue/${actionId}/reject`, { role, user }),
+  advance: (actionId: string) =>
+    post<{ from: string; to: string; by: string; wrote_adjustment_history: boolean }>(
+      `/queue/${actionId}/advance`, undefined),
+  reject: (actionId: string) =>
+    post<{ to: string }>(`/queue/${actionId}/reject`, undefined),
 
-  chat: (body: { question: string; pattern?: string; date?: string; agentic?: boolean;
-                 asked_by?: string }) => post<ChatAnswer>("/chat", body),
+  chat: (body: { question: string; pattern?: string; date?: string; agentic?: boolean }) =>
+    post<ChatAnswer>("/chat", body),
   history: (pattern: string) => get<HistoryTurn[]>("/chat/history", { pattern }),
 };

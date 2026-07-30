@@ -6,8 +6,11 @@ exists to hold:
 
   1. every read is a pass-through to `agent/tools.py` — this layer computes NOTHING,
      so a figure on screen and a figure in an answer cannot disagree;
-  2. the approval chain enforces roles on the SERVER — the Streamlit version only hid
-     the button, which is UX, not a control.
+  2. protected endpoints are wired to the auth dependency at all.
+
+Identity itself is NOT tested here — `tests/test_auth.py` does that with real signed
+tokens (forged, expired, wrong-role). This file overrides the dependency so the routing
+and contract tests are not re-testing JWT decoding for the tenth time.
 """
 from __future__ import annotations
 
@@ -16,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from vrr_agent_open.api import main as API
 from vrr_agent_open.api import routes_approvals as RA
+from vrr_agent_open.api.auth import current_user
 from vrr_agent_open.api import routes_chat as RC
 from vrr_agent_open.api import routes_patterns as RP
 
@@ -28,6 +32,17 @@ DRAFT = {"action_id": "ACT-1", "stage": "draft", "id_pattern": PATTERN,
 
 @pytest.fixture
 def client():
+    """Signed in as the analyst. Overriding the dependency keeps these tests about
+    routing and contracts; `test_auth.py` owns the question of who you are."""
+    API.app.dependency_overrides[current_user] = lambda: {
+        "username": "analyst.demo", "role": "analyst", "claims": {}}
+    yield TestClient(API.app)
+    API.app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anon():
+    """No token at all — for asserting what stays public."""
     return TestClient(API.app)
 
 
@@ -80,67 +95,31 @@ def test_health_never_raises_when_everything_is_down(client, monkeypatch):
 
 
 # ------------------------------------------------------- approval guardrails ----
-def test_wrong_role_cannot_advance_even_by_posting_directly(client, monkeypatch):
-    """The control the Streamlit UI never had: a draft advances on ANALYST sign-off, so
-    an RM posting the transition must be refused by the server."""
-    monkeypatch.setattr(RA, "query", lambda sql, p=None: [DRAFT])
-    wrote = []
-    monkeypatch.setattr(RA, "execute", lambda sql, p: wrote.append(sql))
-
-    r = client.post("/api/queue/ACT-1/advance", json={"role": "rm", "user": "rm.demo"})
-
-    assert r.status_code == 403
-    assert "analyst" in r.json()["detail"]
-    assert wrote == []                      # nothing was written
 
 
-def test_right_role_advances_one_stage(client, monkeypatch):
-    monkeypatch.setattr(RA, "query", lambda sql, p=None: [DRAFT])
-    monkeypatch.setattr(RA, "execute", lambda sql, p: None)
-
-    body = client.post("/api/queue/ACT-1/advance",
-                       json={"role": "analyst", "user": "a.demo"}).json()
-
-    assert (body["from"], body["to"]) == ("draft", "analyst")
-    assert body["wrote_adjustment_history"] is False
 
 
-def test_executing_writes_adjustment_history_before_moving_the_stage(client, monkeypatch):
-    """The ρ learning loop reads adjustment_history — an executed item with no row there
-    would silently never be learned from."""
-    monkeypatch.setattr(RA, "query", lambda sql, p=None: [{**DRAFT, "stage": "site"}])
-    statements = []
-    monkeypatch.setattr(RA, "execute", lambda sql, p: statements.append(sql))
-    monkeypatch.setattr(RA.AP, "build_adjustment_row", lambda *a, **k: {})
-
-    body = client.post("/api/queue/ACT-1/advance",
-                       json={"role": "site", "user": "s.demo"}).json()
-
-    assert body["to"] == "executed"
-    assert "INSERT INTO vrr_agent.adjustment_history" in statements[0]
-    assert "UPDATE vrr_agent.action_queue" in statements[1]      # history first, then stage
 
 
 def test_terminal_stage_cannot_be_advanced(client, monkeypatch):
+    """409 before any role check — there is no next stage to have a role for."""
     monkeypatch.setattr(RA, "query", lambda sql, p=None: [{**DRAFT, "stage": "executed"}])
 
-    r = client.post("/api/queue/ACT-1/advance", json={"role": "site", "user": "s"})
+    r = client.post("/api/queue/ACT-1/advance")
 
     assert r.status_code == 409
 
 
 def test_unknown_action_is_404(client, monkeypatch):
     monkeypatch.setattr(RA, "query", lambda sql, p=None: [])
-    assert client.post("/api/queue/NOPE/advance",
-                       json={"role": "analyst", "user": "a"}).status_code == 404
+    assert client.post("/api/queue/NOPE/advance").status_code == 404
 
 
 def test_submit_refuses_when_no_anomaly_fired(client, monkeypatch):
     """Nothing to approve is a 400, not an empty queue row."""
     monkeypatch.setattr(RP.AZ, "analyze", lambda p, d: {"ok": True, "draft": None})
 
-    r = client.post(f"/api/patterns/{PATTERN}/submit",
-                    json={"date": "2026-04-01", "submitted_by": "a.demo"})
+    r = client.post(f"/api/patterns/{PATTERN}/submit", json={"date": "2026-04-01"})
 
     assert r.status_code == 400
     assert "nothing to draft" in r.json()["detail"]
@@ -205,3 +184,12 @@ def test_stages_endpoint_publishes_the_state_machine(client):
 
     assert body["stages"][:4] == ["draft", "analyst", "rm", "site"]
     assert body["approver_for_stage"]["draft"] == "analyst"
+
+
+def test_reads_need_no_token_but_writes_do(anon, monkeypatch):
+    """The chosen coverage line: look freely, act with a token."""
+    monkeypatch.setattr(RP.T, "list_patterns", lambda: [])
+
+    assert anon.get("/api/patterns").status_code == 200
+    assert anon.post("/api/queue/ACT-1/advance").status_code == 401
+    assert anon.post("/api/chat", json={"question": "hi"}).status_code == 401

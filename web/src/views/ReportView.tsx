@@ -17,10 +17,10 @@ import {
 import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, fmt } from "../components/ui";
 
 interface Props {
-  patternId: string; period: string; trend: TrendRow[]; user: string;
+  patternId: string; period: string; trend: TrendRow[];
 }
 
-export function ReportView({ patternId, period, trend, user }: Props) {
+export function ReportView({ patternId, period, trend }: Props) {
   const [ctx, setCtx] = useState<PatternContext | null>(null);
   const [dec, setDec] = useState<Decompose | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisCase | null>(null);
@@ -68,7 +68,7 @@ export function ReportView({ patternId, period, trend, user }: Props) {
   async function submit() {
     setBusy(true);
     try {
-      const res = await api.submit(patternId, period, user);
+      const res = await api.submit(patternId, period);
       setSubmitted(`Queued ${res.action_id} — next approver: ${res.next_approver}.`);
     } catch (e) {
       setErr(e);

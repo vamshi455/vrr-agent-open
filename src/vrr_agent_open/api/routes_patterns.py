@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..agent import analyst as AZ
 from ..agent import tools as T
+from .auth import CurrentUser
 from .schemas import SubmitRequest
 
 router = APIRouter(prefix="/api", tags=["patterns"])
@@ -97,12 +98,17 @@ def analysis(pattern_id: str, date: str) -> dict:
 
 
 @router.post("/patterns/{pattern_id}/submit")
-def submit(pattern_id: str, body: SubmitRequest) -> dict:
-    """Put the computed draft into the approval queue at stage `draft`."""
+def submit(pattern_id: str, body: SubmitRequest, user: CurrentUser) -> dict:
+    """Put the computed draft into the approval queue at stage `draft`.
+
+    A WRITE, so it needs a token — and `submitted_by` is the authenticated username, not
+    a string the caller supplies. The queue row is the first link in an audit chain that
+    ends at an executed valve change; a self-declared name there is worth nothing.
+    """
     case = AZ.analyze(pattern_id, body.date)
     if not case.get("ok"):
         raise HTTPException(400, case.get("reason", "no analysis for this period"))
     if not case.get("draft"):
         raise HTTPException(400, "no anomaly fired for this period — nothing to draft")
     return T.submit_for_approval(pattern_id, body.date, draft=case["draft"],
-                                 submitted_by=body.submitted_by)
+                                 submitted_by=user["username"])

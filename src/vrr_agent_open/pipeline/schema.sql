@@ -267,3 +267,19 @@ CREATE TABLE IF NOT EXISTS vrr_agent.chat_history (
 );
 CREATE INDEX IF NOT EXISTS chat_history_pattern_created_idx
   ON vrr_agent.chat_history (id_pattern, created_at DESC);
+
+-- API accounts. The approval chain is a chain of PEOPLE, so who you are has to be
+-- something the server establishes rather than something the client claims: before this
+-- table the role travelled in the request body, and any caller could POST "role":"site"
+-- and execute a valve change. Now `role` is a signed JWT claim minted from THIS row.
+-- Passwords are bcrypt hashes; the plaintext never reaches the database or a log.
+-- Seed demo accounts with `make users`.
+CREATE TABLE IF NOT EXISTS vrr_agent.app_user (
+  username text PRIMARY KEY,
+  password_hash text NOT NULL,
+  role text NOT NULL CHECK (role IN ('analyst', 'rm', 'site', 'data_steward', 'admin')),
+  full_name text,
+  active boolean NOT NULL DEFAULT true,
+  created_at timestamptz DEFAULT now(),
+  last_login timestamptz
+);

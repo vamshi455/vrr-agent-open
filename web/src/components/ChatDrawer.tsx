@@ -20,6 +20,8 @@ interface Props {
   /** "high" | "low" vs target — the quick question is worded from it, and the intent
       router keys on those words. Asking "why is X off target" routes to PORTFOLIO. */
   vsTarget: "high" | "low";
+  signedIn: boolean;
+  onNeedSignIn: () => void;
   llmUp: boolean; open: boolean; onToggle: () => void;
 }
 
@@ -28,8 +30,8 @@ interface Turn {
   askedBy?: string | null; at?: string; payload?: unknown; pending?: boolean;
 }
 
-export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llmUp,
-                             open, onToggle }: Props) {
+export function ChatDrawer({ patternId, patternName, period, user, vsTarget, signedIn,
+                             onNeedSignIn, llmUp, open, onToggle }: Props) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [agentic, setAgentic] = useState(false);
@@ -59,13 +61,14 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
 
   async function ask(question: string) {
     if (!question.trim() || busy) return;
+    // Asking costs compute, so it needs a token. Prompt rather than let the POST 401.
+    if (!signedIn) { onNeedSignIn(); return; }
     setInput("");
     setBusy(true);
     setTurns((t) => [...t, { question, answer: "", intent: "", meta: {}, pending: true }]);
     try {
-      const res = await api.chat({
-        question, pattern: patternId, date: period, agentic, asked_by: user,
-      });
+      // No asked_by: the server stamps the transcript with the token's subject.
+      const res = await api.chat({ question, pattern: patternId, date: period, agentic });
       setTurns((t) => [...t.slice(0, -1), {
         question, answer: res.text, intent: res.intent, meta: res.meta ?? {},
         askedBy: user, at: new Date().toISOString(), payload: res.data,
@@ -156,7 +159,7 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={`Ask about ${patternName}…`}
+          placeholder={signedIn ? `Ask about ${patternName}…` : "Sign in to ask…"}
           disabled={busy}
           className="w-full rounded border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
         />

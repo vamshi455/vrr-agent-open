@@ -3,7 +3,7 @@
 # Override explicitly with `make <target> PYTHON=...` to use a different interpreter.
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
-.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register api web web-build app agent \
+.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users api web web-build app agent \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -62,6 +62,9 @@ judges:        ## register the LLM judges server-side (add --start for automatic
 
 register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
 	$(PYTHON) -m vrr_agent_open.governance.uc_register
+
+users:         ## create vrr_agent.app_user + seed the demo accounts (add p=<password>)
+	$(PYTHON) scripts/seed_users.py $(p)
 
 api:           ## FastAPI backend (docs at http://localhost:8000/docs)
 	$(PYTHON) -m uvicorn vrr_agent_open.api.main:app --reload --port 8000

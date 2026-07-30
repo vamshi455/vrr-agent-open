@@ -27,7 +27,8 @@ from fastapi.staticfiles import StaticFiles
 from ..agent import llm as LLM
 from ..agent import tracing as TRACING
 from ..config import load_config
-from . import routes_approvals, routes_chat, routes_patterns
+from . import auth as AUTH
+from . import routes_approvals, routes_auth, routes_chat, routes_patterns
 from .db import query
 
 CFG = load_config()
@@ -47,6 +48,13 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=DEV_ORIGINS, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
+if AUTH.SECRET_IS_EPHEMERAL:
+    # Loud, once, at import: without VRR_JWT_SECRET every restart silently signs with a
+    # new key, so yesterday's token 401s and it looks like a bug rather than a setting.
+    print("⚠️  VRR_JWT_SECRET not set — signing tokens with a random per-process key; "
+          "they will not survive a restart. Set one in .env for stable sessions.")
+
+app.include_router(routes_auth.router)
 app.include_router(routes_patterns.router)
 app.include_router(routes_approvals.router)
 app.include_router(routes_chat.router)
@@ -82,6 +90,9 @@ def health() -> dict:
         pass
 
     return {
+        "auth": {"required_for": ["writes", "chat"], "scheme": "OAuth2 password → JWT bearer",
+                 "token_ttl_minutes": AUTH.TOKEN_TTL_MINUTES,
+                 "ephemeral_secret": AUTH.SECRET_IS_EPHEMERAL},
         "llm": {"available": llm_up, "model": model, "provider": LLM.provider()},
         "tracing": {"enabled": TRACING.enabled(), "uri": CFG.mlflow_uri},
         "postgres": {"host": CFG.pg_dsn.split("@")[-1], "monthly_rows": patterns_loaded},

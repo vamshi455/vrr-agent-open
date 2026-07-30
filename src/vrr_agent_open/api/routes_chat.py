@@ -16,14 +16,20 @@ from fastapi import APIRouter, HTTPException, Query
 from ..agent import chat as CH
 from ..agent import history as HIST
 from ..agent import tools as T
+from .auth import CurrentUser
 from .schemas import ChatRequest
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 @router.post("/chat")
-def ask(body: ChatRequest) -> dict:
-    """Answer one question. `agentic=true` lets the model drive the tool loop itself."""
+def ask(body: ChatRequest, user: CurrentUser) -> dict:
+    """Answer one question. `agentic=true` lets the model drive the tool loop itself.
+
+    Authenticated because it spends real compute — an open endpoint here is an open
+    invitation to drive someone else's GPU. `asked_by` in the shared transcript comes
+    from the token, so the drawer shows who actually asked.
+    """
     try:
         result = CH.respond(body.question, pattern=body.pattern, date=body.date,
                             agentic=body.agentic)
@@ -37,7 +43,7 @@ def ask(body: ChatRequest) -> dict:
             ctx = T.pattern_context(body.pattern) or {}
             HIST.log_turn(pattern_id=body.pattern, pattern_name=ctx.get("pattern_name"),
                           date=body.date, question=body.question, result=result,
-                          asked_by=body.asked_by, agentic=body.agentic)
+                          asked_by=user["username"], agentic=body.agentic)
             saved = True
         except Exception:
             saved = False                       # the answer still stands; only durability is lost

@@ -15,20 +15,17 @@ class ChatRequest(BaseModel):
     pattern: str | None = None          # sidebar context: pattern the analyst is looking at
     date: str | None = None             # sidebar context: period under review, YYYY-MM-DD
     agentic: bool = False               # let the model drive the tool loop itself
-    asked_by: str = "anonymous"
     persist: bool = True                # write the turn to vrr_agent.chat_history
+    # NOTE: no `asked_by` — the asker is the authenticated user. A client-supplied
+    # identity in a shared transcript is a signature anyone can forge.
 
 
 class SubmitRequest(BaseModel):
     date: str
-    submitted_by: str
+    # no `submitted_by`: it is the token's subject.
 
 
-class StageRequest(BaseModel):
-    """Advancing or rejecting a queued action.
-
-    `role` is what the caller claims to be acting as, and the server checks it against
-    the stage — the client is never trusted to decide whether a transition is allowed.
-    """
-    role: str
-    user: str
+# StageRequest is gone on purpose. Advancing or rejecting takes NO body at all: the
+# actor is the token's subject and the role is its signed claim, so there was nothing
+# left for the client to send — and anything it could send would be a claim about
+# itself, which is exactly what this refactor removed.

@@ -1,10 +1,15 @@
 """The approval chain — draft → analyst → rm → site → executed.
 
-**Role enforcement lives here, not in the browser.** The Streamlit version hid the
-approve button when your role did not match the stage, which is fine as UX and worthless
-as a control: anyone could POST the transition. This layer re-checks the role against
-the stage on every call and refuses with 403, so hiding the button in React is now a
-convenience rather than the mechanism.
+**Role enforcement lives here, and the role comes from the TOKEN.** Three versions of
+this check, each fixing the previous one:
+
+  1. Streamlit hid the approve button when your role did not match the stage — UX, not
+     a control; anyone could POST the transition.
+  2. The first FastAPI cut re-checked the role server-side, but read it from the REQUEST
+     BODY. The state machine was enforced against a role the caller chose.
+  3. Now the role is a signed JWT claim (`api/auth.py`). To act as the site engineer you
+     sign in as the site engineer; the body cannot say otherwise, because it no longer
+     carries a role at all.
 
 Advancing to `executed` also writes `vrr_agent.adjustment_history` — the row the ρ
 learning loop reads back. That write and the stage update happen for the same action_id
@@ -15,8 +20,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core import approval as AP
+from .auth import CurrentUser
 from .db import execute, query
-from .schemas import StageRequest
 
 router = APIRouter(prefix="/api", tags=["approvals"])
 
@@ -64,8 +69,8 @@ def _load(action_id: str) -> dict:
 
 
 @router.post("/queue/{action_id}/advance")
-def advance(action_id: str, body: StageRequest) -> dict:
-    """Move one item to the next stage, checking the caller's role against the current one."""
+def advance(action_id: str, user: CurrentUser) -> dict:
+    """Move one item to the next stage, checking the caller's TOKEN role against it."""
     item = _load(action_id)
     stage = item["stage"]
     nxt = AP.next_stage(stage)
@@ -73,10 +78,10 @@ def advance(action_id: str, body: StageRequest) -> dict:
         raise HTTPException(409, f"stage '{stage}' is terminal — no further transitions")
 
     needed = APPROVER_FOR_STAGE.get(stage)
-    if body.role != needed:
+    if user["role"] != needed:
         raise HTTPException(
-            403, f"stage '{stage}' advances on {needed} sign-off; you are acting as "
-                 f"'{body.role}'")
+            403, f"stage '{stage}' advances on {needed} sign-off; you are signed in as "
+                 f"'{user['username']}' ({user['role']})")
 
     if nxt == "executed":
         # The ρ loop reads this table, so the row is written BEFORE the stage moves —
@@ -85,25 +90,29 @@ def advance(action_id: str, body: StageRequest) -> dict:
         if isinstance(rec, str):
             import json
             rec = json.loads(rec)
-        execute(_INSERT_ADJUSTMENT, AP.build_adjustment_row(item, rec, approver=body.user))
+        execute(_INSERT_ADJUSTMENT,
+                AP.build_adjustment_row(item, rec, approver=user["username"]))
 
     execute("UPDATE vrr_agent.action_queue SET stage=%(n)s, stage_by=%(u)s, stage_ts=now()"
-            " WHERE action_id=%(i)s", {"n": nxt, "u": body.user, "i": action_id})
-    return {"action_id": action_id, "from": stage, "to": nxt, "by": body.user,
+            " WHERE action_id=%(i)s",
+            {"n": nxt, "u": user["username"], "i": action_id})
+    return {"action_id": action_id, "from": stage, "to": nxt, "by": user["username"],
             "wrote_adjustment_history": nxt == "executed"}
 
 
 @router.post("/queue/{action_id}/reject")
-def reject(action_id: str, body: StageRequest) -> dict:
+def reject(action_id: str, user: CurrentUser) -> dict:
     """Any approver in the chain may reject; rejection is terminal."""
     item = _load(action_id)
     stage = item["stage"]
     if stage in ("executed", "rejected"):
         raise HTTPException(409, f"stage '{stage}' is terminal")
     needed = APPROVER_FOR_STAGE.get(stage)
-    if body.role != needed:
+    if user["role"] != needed:
         raise HTTPException(403, f"stage '{stage}' is actioned by {needed}, not "
-                                 f"'{body.role}'")
+                                 f"'{user['role']}'")
     execute("UPDATE vrr_agent.action_queue SET stage='rejected', stage_by=%(u)s,"
-            " stage_ts=now() WHERE action_id=%(i)s", {"u": body.user, "i": action_id})
-    return {"action_id": action_id, "from": stage, "to": "rejected", "by": body.user}
+            " stage_ts=now() WHERE action_id=%(i)s",
+            {"u": user["username"], "i": action_id})
+    return {"action_id": action_id, "from": stage, "to": "rejected",
+            "by": user["username"]}

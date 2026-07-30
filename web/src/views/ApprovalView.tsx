@@ -2,9 +2,9 @@
  * Approval queue — "who signs this off?"
  *
  * Advisory only: the agent writes `draft`, and every forward step is a human act. The
- * role check below hides buttons you may not press, but that is UX — the SERVER refuses
- * a transition your role does not own (403 from routes_approvals.py). The Streamlit
- * version only hid the button, which anyone could bypass with a POST.
+ * check below hides buttons you may not press, but that is UX — the SERVER refuses a
+ * transition your TOKEN's role does not own (403 from routes_approvals.py). Neither the
+ * button nor the request body decides: the JWT claim does.
  *
  * Reaching `executed` writes vrr_agent.adjustment_history, which is what the ρ learning
  * loop reads back.
@@ -13,9 +13,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type Adjustment, type QueueItem, type Stages } from "../api";
 import { Badge, Banner, Card, DataTable, ErrorNote, Spinner, fmt } from "../components/ui";
 
-interface Props { role: string; user: string }
+interface Props { role: string }
 
-export function ApprovalView({ role, user }: Props) {
+export function ApprovalView({ role }: Props) {
   const [stages, setStages] = useState<Stages | null>(null);
   const [stage, setStage] = useState("draft");
   const [items, setItems] = useState<QueueItem[] | null>(null);
@@ -41,8 +41,8 @@ export function ApprovalView({ role, user }: Props) {
   async function act(item: QueueItem, kind: "advance" | "reject") {
     try {
       const res = kind === "advance"
-        ? await api.advance(item.action_id, role, user)
-        : await api.reject(item.action_id, role, user);
+        ? await api.advance(item.action_id)
+        : await api.reject(item.action_id);
       setNote({
         tone: "good",
         text: kind === "advance"
@@ -80,7 +80,8 @@ export function ApprovalView({ role, user }: Props) {
         <p className="text-xs text-slate-500">
           {needed
             ? <>advances on <strong>{needed}</strong> sign-off — you are acting as{" "}
-                <strong>{role}</strong>{canAction ? "" : " (switch role in the sidebar)"}</>
+                <strong>{role || "not signed in"}</strong>
+                {canAction ? "" : " — sign in as that role to action it"}</>
             : "terminal stage — no further transitions"}
         </p>
       </div>
