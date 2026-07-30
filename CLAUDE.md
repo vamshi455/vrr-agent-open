@@ -12,7 +12,10 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - **LangGraph** — the agent tool-loop + faithfulness-gate node (replaces Mosaic ChatAgent)
 - **Unity Catalog OSS** — governance catalog-of-record (RBAC + lineage; NOT a query engine)
 - **MLflow OSS** — tracing / eval / registry
-- **Streamlit** — report + approval UI
+- **FastAPI + React** (Vite · TypeScript · Tailwind) — the workbench: 4 views + a docked
+  chat drawer over a 20-endpoint API. Streamlit was retired 2026-07-30; the API layer is
+  also where approval **role checks are enforced** (403), which the Streamlit build only
+  simulated by hiding a button.
 - **Ollama** — local LLM narrator/tool-caller (`qwen2.5:7b`) + `nomic-embed-text`
   embeddings (pluggable; everything still runs LLM-free). `VRR_LLM_PROVIDER=openai|anthropic`
   switches the narrator to a hosted model (`agent/providers.py` translates tool calling into
@@ -64,10 +67,11 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   plan → tools → gate → repair/budget, append-only reducers on messages/trace/facts, gate on
   every path to END, `InMemorySaver` so `run(..., thread_id=…)` resumes; it was a hand-rolled
   loop before, with langgraph declared but never imported) · `agent/llm.py` (Ollama client) ·
-  `pipeline/anomaly_to_queue.py` (`make queue`) · 4-tab Streamlit app (portfolio, chart+date
-  filter+draft, lineage+audit, role-gated approval writing `adjustment_history`) with
-  the analyst chat as a right-docked collapsible drawer beside every tab, its transcript
-  persisted per pattern in `vrr_agent.chat_history` (`agent/history.py`) and shared across users.
+  `pipeline/anomaly_to_queue.py` (`make queue`) · **`api/` FastAPI + `web/` React workbench**
+  (portfolio, chart+attribution+draft, lineage+audit recompute, role-gated approval writing
+  `adjustment_history`) with the analyst chat as a right-docked drawer beside every view,
+  its transcript persisted per pattern in `vrr_agent.chat_history` (`agent/history.py`) and
+  shared across users. `make api` · `make web` (dev) · `make app` (build + serve on :8000).
 - ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
   step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set
@@ -96,7 +100,7 @@ See [docs/running.md](docs/running.md) (every command commented). Fast path:
 
 **Evaluation rule** — always `make traces` immediately before `make eval`, and only ever
 via the Makefile (`make eval` = `--eval-only`, which filters `tags.eval_case != ''`).
-Running `evaluate_model.py` bare scores the last 50 traces of *any* origin (Streamlit,
+Running `evaluate_model.py` bare scores the last 50 traces of *any* origin (the workbench,
 `make agent`, older sets), so the run's `*/mean` denominators shift and two `vrr-eval` runs
 stop being comparable; it also picks `model_id` from an arbitrary member of the trace set
 when versions are mixed. Judges need Ollama up; `--no-judges` skips them (seconds, not

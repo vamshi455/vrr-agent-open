@@ -3,7 +3,7 @@
 # Override explicitly with `make <target> PYTHON=...` to use a different interpreter.
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
-.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register app agent \
+.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register api web web-build app agent \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -63,8 +63,17 @@ judges:        ## register the LLM judges server-side (add --start for automatic
 register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
 	$(PYTHON) -m vrr_agent_open.governance.uc_register
 
-app:           ## launch the Streamlit review + approval UI
-	$(PYTHON) -m streamlit run src/vrr_agent_open/app/streamlit_app.py
+api:           ## FastAPI backend (docs at http://localhost:8000/docs)
+	$(PYTHON) -m uvicorn vrr_agent_open.api.main:app --reload --port 8000
+
+web:           ## React dev server with hot reload (proxies /api to :8000)
+	cd web && npm install && npm run dev
+
+web-build:     ## build the React app; `make api` then serves it at :8000
+	cd web && npm install && npm run build
+
+app:           ## one-process workbench: build the UI, then serve it from FastAPI
+	$(MAKE) web-build && $(PYTHON) -m uvicorn vrr_agent_open.api.main:app --port 8000
 
 agent:         ## run one agent question from the CLI
 	$(PYTHON) -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"

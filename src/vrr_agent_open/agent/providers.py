@@ -45,7 +45,7 @@ def available(provider: str, timeout: float = 1.5) -> bool:
 
     Local means "is the server up"; hosted means "is a key configured" — deliberately
     NOT a live ping, because a network call per availability check would show up on a
-    bill and in the latency of every Streamlit rerun.
+    bill and in the latency of every /api/health poll.
     """
     if provider == "ollama":
         try:

@@ -1,24 +1,27 @@
 # Analyst workflow — from a suspicious number to an approved valve change
 
-How the app tabs, the always-present chat, the agent, and the deterministic core fit
-together. Companion to [design.md](design.md) (why) and [running.md](running.md)
+How the workbench views, the always-present chat, the agent, and the deterministic core
+fit together. The UI is React (`web/`) over FastAPI (`api/`); Streamlit was retired on
+2026-07-30. Companion to [design.md](design.md) (why) and [running.md](running.md)
 (commands).
 
 ## The loop
 
 ```
-      ┌──────────── Streamlit workbench (make app) ─────────────┐
+      ┌──────────── React workbench (make app) ─────────────────┐
       │ 🗺️ Portfolio   every pattern vs target, ranked by drift  │
       │ 📈 Report      trend + band + ΔVRR attribution + draft   │
       │ 🔎 Lineage     raw → PVT → contrib → monthly + RECOMPUTE │
       │ ✅ Approval    draft → analyst → RM → site → executed    │
       ├─────────────────────────────────────────────────────────┤
-      │ 💬 Chat — a drawer docked RIGHT of every tab, collapsible │
+      │ 💬 Chat — a drawer docked RIGHT of every view, collapsible│
       │    with 💬/✕; carries the sidebar's pattern + period, and │
       │    its transcript persists in vrr_agent.chat_history     │
       └────────────────────────┬────────────────────────────────┘
                                │ every number
       ┌────────────────────────▼────────────────────────────────┐
+      │ api/ — FastAPI: 20 endpoints, role checks enforced HERE  │
+      ├─────────────────────────────────────────────────────────┤
       │ agent/tools.py — deterministic tools over PostgreSQL     │
       │ core/physics · decompose · anomaly · recommend · approval│
       └──────────────────────────────────────────────────────────┘
@@ -53,7 +56,8 @@ ollama pull qwen2.5:7b             # narrator + tool-caller (reliable tool schem
 ollama pull nomic-embed-text       # 768-dim embeddings for knowledge search
 ```
 
-The app auto-detects it (sidebar flips to 🟢 with the model name). `VRR_LLM_MODEL`
+The workbench auto-detects it via `/api/health` (the sidebar flips to 🟢 with the model
+name). `VRR_LLM_MODEL`
 overrides the choice; `agent.llm.pick_model()` falls back to whatever chat model is
 actually pulled, so any local model works. `VRR_LLM_BASE_URL` points at any other
 OpenAI-compatible endpoint.

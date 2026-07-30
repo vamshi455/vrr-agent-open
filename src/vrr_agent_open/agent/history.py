@@ -6,7 +6,7 @@ prose: letting the model read prior answers back would break the trust model (ev
 number must trace to a tool with provenance), and a history write showing up as a TOOL
 span would be scored by the deterministic trace scorers in `evaluation/`.
 
-`log_turn` is called ONLY from the Streamlit app, never from `chat.respond()`:
+`log_turn` is called ONLY from the API layer, never from `chat.respond()`:
 `scripts/create_traces.py` calls `respond()` for all ten evaluation questions, and
 logging there would write synthetic rows into the shared transcript on every
 `make traces`.

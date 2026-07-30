@@ -1,0 +1,109 @@
+"""The approval chain — draft → analyst → rm → site → executed.
+
+**Role enforcement lives here, not in the browser.** The Streamlit version hid the
+approve button when your role did not match the stage, which is fine as UX and worthless
+as a control: anyone could POST the transition. This layer re-checks the role against
+the stage on every call and refuses with 403, so hiding the button in React is now a
+convenience rather than the mechanism.
+
+Advancing to `executed` also writes `vrr_agent.adjustment_history` — the row the ρ
+learning loop reads back. That write and the stage update happen for the same action_id
+in one request; if the history insert fails, the stage does not move.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter, HTTPException, Query
+
+from ..core import approval as AP
+from .db import execute, query
+from .schemas import StageRequest
+
+router = APIRouter(prefix="/api", tags=["approvals"])
+
+# Which role may advance an item that currently sits at each stage.
+APPROVER_FOR_STAGE = {"draft": "analyst", "analyst": "rm", "rm": "site", "site": "site"}
+ROLES = ["analyst", "rm", "site"]
+
+_INSERT_ADJUSTMENT = (
+    "INSERT INTO vrr_agent.adjustment_history (action_id, id_pattern, pattern_name,"
+    " vrr_date, driver, anomaly, change_type, d_inj_res_bbl, d_surface_pct, pre_vrr,"
+    " predicted_post_vrr, actual_post_vrr, decision, approved_by, outcome) VALUES"
+    " (%(action_id)s,%(id_pattern)s,%(pattern_name)s,%(vrr_date)s,%(driver)s,%(anomaly)s,"
+    " %(change_type)s,%(d_inj_res_bbl)s,%(d_surface_pct)s,%(pre_vrr)s,"
+    " %(predicted_post_vrr)s,%(actual_post_vrr)s,%(decision)s,%(approved_by)s,%(outcome)s)")
+
+
+@router.get("/stages")
+def stages() -> dict:
+    """The state machine, so the UI never hard-codes it."""
+    return {"stages": [*AP.STAGES, "rejected"], "roles": ROLES,
+            "approver_for_stage": APPROVER_FOR_STAGE}
+
+
+@router.get("/queue")
+def queue(stage: str = Query("draft")) -> list[dict]:
+    return query("SELECT * FROM vrr_agent.action_queue WHERE stage=%(s)s "
+                 "ORDER BY severity, created_at DESC", {"s": stage})
+
+
+@router.get("/adjustments")
+def adjustments(limit: int = Query(25, le=200)) -> list[dict]:
+    """Executed changes — the ρ-learning input."""
+    return query("SELECT action_id, pattern_name, vrr_date, change_type, d_surface_pct,"
+                 " pre_vrr, predicted_post_vrr, actual_post_vrr, approved_by, ts"
+                 " FROM vrr_agent.adjustment_history ORDER BY ts DESC LIMIT %(n)s",
+                 {"n": limit})
+
+
+def _load(action_id: str) -> dict:
+    rows = query("SELECT * FROM vrr_agent.action_queue WHERE action_id=%(i)s",
+                 {"i": action_id})
+    if not rows:
+        raise HTTPException(404, f"unknown action {action_id}")
+    return rows[0]
+
+
+@router.post("/queue/{action_id}/advance")
+def advance(action_id: str, body: StageRequest) -> dict:
+    """Move one item to the next stage, checking the caller's role against the current one."""
+    item = _load(action_id)
+    stage = item["stage"]
+    nxt = AP.next_stage(stage)
+    if not nxt:
+        raise HTTPException(409, f"stage '{stage}' is terminal — no further transitions")
+
+    needed = APPROVER_FOR_STAGE.get(stage)
+    if body.role != needed:
+        raise HTTPException(
+            403, f"stage '{stage}' advances on {needed} sign-off; you are acting as "
+                 f"'{body.role}'")
+
+    if nxt == "executed":
+        # The ρ loop reads this table, so the row is written BEFORE the stage moves —
+        # an executed item with no history row would silently never be learned from.
+        rec = item.get("recommendation")
+        if isinstance(rec, str):
+            import json
+            rec = json.loads(rec)
+        execute(_INSERT_ADJUSTMENT, AP.build_adjustment_row(item, rec, approver=body.user))
+
+    execute("UPDATE vrr_agent.action_queue SET stage=%(n)s, stage_by=%(u)s, stage_ts=now()"
+            " WHERE action_id=%(i)s", {"n": nxt, "u": body.user, "i": action_id})
+    return {"action_id": action_id, "from": stage, "to": nxt, "by": body.user,
+            "wrote_adjustment_history": nxt == "executed"}
+
+
+@router.post("/queue/{action_id}/reject")
+def reject(action_id: str, body: StageRequest) -> dict:
+    """Any approver in the chain may reject; rejection is terminal."""
+    item = _load(action_id)
+    stage = item["stage"]
+    if stage in ("executed", "rejected"):
+        raise HTTPException(409, f"stage '{stage}' is terminal")
+    needed = APPROVER_FOR_STAGE.get(stage)
+    if body.role != needed:
+        raise HTTPException(403, f"stage '{stage}' is actioned by {needed}, not "
+                                 f"'{body.role}'")
+    execute("UPDATE vrr_agent.action_queue SET stage='rejected', stage_by=%(u)s,"
+            " stage_ts=now() WHERE action_id=%(i)s", {"u": body.user, "i": action_id})
+    return {"action_id": action_id, "from": stage, "to": "rejected", "by": body.user}

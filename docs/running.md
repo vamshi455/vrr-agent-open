@@ -60,7 +60,7 @@ make build
 # (governance metadata + RBAC + lineage). Postgres stays the engine.
 make register
 
-# Launch the Streamlit UI at http://localhost:8501
+# Build the React UI and serve it from FastAPI at http://localhost:8000
 #   🗺️ Portfolio tab   — every pattern's latest VRR vs target, ranked by drift
 #   📈 Report tab       — VRR chart + date filter + target band + ΔVRR attribution,
 #                         and the draft valve change for this period
@@ -70,7 +70,7 @@ make register
 #                         tab is open (💬/✕ to toggle). The transcript is stored in
 #                         vrr_agent.chat_history, so it survives a refresh and is shared
 #                         per pattern (deterministic tools; LLM phrasing when Ollama is up)
-make app                          # Ctrl+C to stop
+make app          # build web/ then serve it from FastAPI                          # Ctrl+C to stop
 
 # (Optional) Ask the agent — needs a local LLM via Ollama:
 ollama pull llama3.1              # narrator model (one-time)
@@ -96,4 +96,5 @@ docker compose down -v     # stop + DELETE data volumes (fresh start next time)
 - `make <target>` just runs the commented commands in the [Makefile](../Makefile).
 - The `agent/graph.py` LLM+gate wiring and `agent/tools.py` `vrr_decompose` SQL are
   `TODO`-marked skeletons; the deterministic core and the PDF→pgvector path are complete.
-- Ports in use: 5432 (Postgres), 8080 (Unity Catalog), 5000 (MLflow), 8501 (Streamlit).
+- Ports in use: 5432 (Postgres), 8080 (Unity Catalog), 5000 (MLflow), 8000 (FastAPI),
+  5173 (Vite dev server, only during `make web`).

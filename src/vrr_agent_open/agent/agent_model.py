@@ -10,7 +10,7 @@ Registering buys three things the loose functions don't:
     thing being evaluated is the thing that would be served.
 
 It is a thin wrapper on purpose: all behaviour stays in :mod:`vrr_agent_open.agent.chat`
-so the Streamlit app, the CLI and the logged model cannot drift apart. Logged with
+so the API, the CLI and the logged model cannot drift apart. Logged with
 ``python_model`` pointing at this file's path (log-model-from-code), so the artifact
 records source rather than a pickled object.
 

@@ -18,7 +18,7 @@ rebuilt on a free, local stack.
 | Tracing / eval / registry | MLflow (managed) | **MLflow OSS** (local server, Postgres backend) |
 | Vector index | Vector Search | **pgvector** (same Postgres) |
 | Serving | Model Serving endpoint | **FastAPI/LangServe** or in-process |
-| UI | Databricks Apps | **Streamlit** (local) |
+| UI | Databricks Apps | **React + Vite + TS** over **FastAPI** (local) |
 | Packaging/deploy | DAB bundle | **docker-compose** + `pip install -e .` |
 | LLM narrator | claude-sonnet-5 (in-workspace) | **Ollama** local (pluggable) |
 
@@ -65,7 +65,7 @@ flowchart LR
     RAW[("Postgres vrr_raw")] --> BUILD["vrr_build (SQL + core/physics)"]
     BUILD --> CUR[("vrr_curated.completion_contrib → pattern_vrr (daily+monthly)")]
     CUR --> ANOM["anomaly + recommend"] --> Q[("vrr_agent.action_queue")]
-    Q --> APP["👤 Streamlit approval"] --> AH[("adjustment_history")]
+    Q --> APP["👤 React approval queue"] --> AH[("adjustment_history")]
     AH --> LEARN["ρ EMA → pattern_memory"] --> ANOM
     CUR --> TOOLS["LangGraph agent tools"] --> LLM["Ollama narrates + gate"]
     KB[("vrr_agent.reservoir_knowledge<br/>pgvector")] --> LLM

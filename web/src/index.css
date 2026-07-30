@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tabular figures everywhere a number appears — a VRR column that jitters between rows
+   is harder to scan, and this app is mostly columns of numbers. */
+@layer base {
+  html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  code { font-size: 0.95em; }
+}
+
+/* Agent answers are markdown: bold figures, a sources footer, and the portfolio scan
+   returns a table. Scoped styles rather than @tailwindcss/typography — the drawer is
+   narrow and the plugin's default measure/margins are tuned for article width. */
+@layer components {
+  .prose-agent :where(p) { margin: 0.35rem 0; }
+  .prose-agent :where(p:first-child) { margin-top: 0; }
+  .prose-agent :where(p:last-child) { margin-bottom: 0; }
+  .prose-agent :where(strong) { font-weight: 600; color: #0f172a; }
+  .prose-agent :where(em) { color: #64748b; font-style: normal; font-size: 0.92em; }
+  .prose-agent :where(ul, ol) { margin: 0.35rem 0; padding-left: 1.1rem; }
+  .prose-agent :where(ul) { list-style: disc; }
+  .prose-agent :where(ol) { list-style: decimal; }
+  .prose-agent :where(li) { margin: 0.1rem 0; }
+  .prose-agent :where(code) {
+    background: #f1f5f9; border-radius: 3px; padding: 0 3px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em;
+  }
+  .prose-agent :where(h1, h2, h3, h4) {
+    font-weight: 600; font-size: 0.95em; margin: 0.6rem 0 0.25rem;
+  }
+  .prose-agent :where(table) {
+    display: block; overflow-x: auto; font-size: 0.8em; margin: 0.4rem 0;
+    border-collapse: collapse; white-space: nowrap;
+  }
+  .prose-agent :where(th, td) { border: 1px solid #e2e8f0; padding: 2px 6px; }
+  .prose-agent :where(th) { background: #f8fafc; font-weight: 600; }
+}

@@ -6,6 +6,8 @@
 ![LangGraph](https://img.shields.io/badge/agent-LangGraph%20StateGraph-1C3C3C)
 ![PostgreSQL](https://img.shields.io/badge/data-PostgreSQL%20%2B%20pgvector-336791)
 ![Unity Catalog](https://img.shields.io/badge/governance-Unity%20Catalog%20OSS-red)
+![FastAPI](https://img.shields.io/badge/api-FastAPI-009688)
+![React](https://img.shields.io/badge/ui-React%20%2B%20Vite%20%2B%20TS-61DAFB)
 ![MLflow](https://img.shields.io/badge/tracing%20%2B%20eval-MLflow%20OSS-0194E2)
 ![Tests](https://img.shields.io/badge/tests-129%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
@@ -39,6 +41,7 @@ learned per-pattern response factor ρ — rebuilt on a free local stack.
 | [10. Evaluation](#10-evaluation--prompts-traces-scorers-judges) | prompts, traces, scorers, judges |
 | [11. Observability](#11-observability--the-trace-span-tree) | the MLflow span tree |
 | [12. Governance](#12-governance--unity-catalog-as-catalog-of-record) | Unity Catalog, honestly |
+| [12b. The workbench](#12b-the-workbench--react-over-fastapi) | React over FastAPI, and why the split |
 | [13. Run it](#13-run-it) | every make target |
 | [14. Repo layout](#14-repository-layout) | where everything lives |
 | [15. Status](#15-status--what-is-real-and-what-is-not) | what is real, what is not |
@@ -96,12 +99,18 @@ starts in the green box.**
 
 ```mermaid
 flowchart TB
-    subgraph UI["🖥️ Streamlit workbench — make app"]
+    subgraph UI["🖥️ React workbench (web/) — make app"]
         T1["🗺️ Portfolio — every pattern vs target"]
         T2["📈 Report — trend + ΔVRR attribution"]
         T3["🔎 Lineage — raw to curated + RECOMPUTE"]
         T4["✅ Approval queue — draft to analyst to RM to site"]
-        DRAWER["💬 Chat drawer, docked right of every tab<br/>transcript in vrr_agent.chat_history"]
+        DRAWER["💬 Chat drawer, docked right of every view<br/>transcript in vrr_agent.chat_history"]
+    end
+
+    subgraph APIL["🌐 FastAPI (api/) — 20 endpoints"]
+        RP["routes_patterns — reads, pass-through to tools"]
+        RA["routes_approvals — role checks ENFORCED here"]
+        RC["routes_chat — one gated answer per request"]
     end
 
     subgraph AGENT["🧠 agent/ — the reasoning layer"]
@@ -134,8 +143,10 @@ flowchart TB
         OLL["Ollama<br/>qwen2.5:7b + nomic-embed-text"]
     end
 
-    UI --> CHAT
-    DRAWER --> CHAT
+    UI --> APIL
+    DRAWER --> APIL
+    APIL --> CHAT
+    APIL --> TOOLS
     CHAT -->|"default"| ANALYST
     CHAT -->|"agentic=true"| GRAPH
     ANALYST --> TOOLS
@@ -152,6 +163,7 @@ flowchart TB
     style PG fill:#e8eaed,stroke:#5f6368
     style AGENT fill:#e8f0fe,stroke:#4285f4
     style OPS fill:#f3e8fd,stroke:#a142f4
+    style APIL fill:#e0f2f1,stroke:#009688
 ```
 
 ### Stack, and why each piece
@@ -165,7 +177,8 @@ flowchart TB
 | Embeddings | **nomic-embed-text** | 768-dim, local, matches the `vector(768)` column |
 | Governance | **Unity Catalog OSS** | catalog-of-record (RBAC + lineage) — [not a query engine](#12-governance--unity-catalog-as-catalog-of-record) |
 | Tracing / eval / registry | **MLflow OSS** | span trees, scorers, prompt versioning |
-| UI | **Streamlit** | 4 tabs + a docked chat drawer |
+| UI | **React + Vite + TypeScript + Tailwind** | 4 views + a docked chat drawer, talking to FastAPI |
+| API | **FastAPI** | the same tools over HTTP — and where the approval role checks live |
 
 ---
 
@@ -710,6 +723,72 @@ alternative all-Delta design: [docs/design.md](docs/design.md).
 
 ---
 
+## 12b. The workbench — React over FastAPI
+
+Streamlit was retired in favour of a real client/server split. The reason is not
+cosmetic: in the Streamlit version the approval role check was *hiding a button*, which
+is UX, not a control. Now the client asks and the **server decides**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser (React)
+    participant A as FastAPI
+    participant T as agent/tools.py
+    participant C as core/
+    participant P as PostgreSQL
+
+    B->>A: GET /api/patterns/{id}/audit?date=…
+    A->>T: VRR_AUDIT(pattern, date)
+    T->>P: read raw daily rows
+    T->>C: core.physics recompute
+    C-->>T: vrr + pvt_methods + provenance
+    T-->>A: tool payload (verbatim)
+    A-->>B: same payload, provenance intact
+
+    Note over B,A: the browser and the LLM call the SAME tool,<br/>so a chart and an answer cannot disagree
+
+    B->>A: POST /api/queue/{id}/advance {role: "rm"}
+    A->>A: stage 'draft' needs ANALYST
+    A-->>B: 403 — refused server-side
+```
+
+**The endpoints** (full OpenAPI at `:8000/docs`):
+
+| Group | Endpoints |
+|---|---|
+| Reads | `/patterns` · `/overview` · `/data-quality` · `/input-audit` · `/patterns/{id}/context` `/trend` `/decompose` `/audit` `/lineage` `/completions` `/analysis` |
+| Writes | `/patterns/{id}/submit` · `/queue/{id}/advance` · `/queue/{id}/reject` |
+| Chat | `POST /chat` · `GET /chat/history` |
+| System | `/health` · `/stages` · `/queue` · `/adjustments` |
+
+**Three rules this layer holds:**
+
+1. **No endpoint computes.** Reads are pass-throughs to `agent/tools.py`, provenance keys
+   and all. A test asserts the payload comes back *verbatim* — the moment the API
+   reshapes a tool result, the number on screen stops being the number the tool produced.
+2. **Guardrails are server-side.** Role checks, terminal-stage refusals, and the
+   adjustment-history write all live in `routes_approvals.py`. Verified live: `rm`
+   posting an advance on a `draft` gets **403**; `analyst` gets **200**.
+3. **`adjustment_history` is written before the stage moves.** An executed item with no
+   history row would silently never be learned from by the ρ loop.
+
+**Why plain JSON and not token streaming:** `core.faithfulness` can only verify a
+*finished* answer. Streaming tokens would mean streaming text the gate has not approved
+and may replace. Streaming *progress events* (which tool is running) is the sane future
+addition; streaming the narration is not.
+
+The React side is deliberately thin — `web/src/api.ts` is the only place it speaks HTTP,
+and no view does arithmetic. It renders what the tools computed, plus the provenance
+caption under every answer:
+
+```
+Computed from your tables · qwen2.5:7b phrasing · ✅ gate passed after one repair
+▸ Evidence & provenance
+```
+
+---
+
 ## 13. Run it
 
 ```bash
@@ -722,7 +801,11 @@ docker compose up -d        # postgres+pgvector · unitycatalog · mlflow
 make seed                   # synthetic VRR data; core.physics computes curated
 make build                  # rebuild vrr_curated from vrr_raw alone
 make queue                  # anomaly → action_queue drafts awaiting approval
-make app                    # Streamlit: 4 tabs + the docked chat drawer
+make app                    # build the React UI and serve it from FastAPI on :8000
+
+# ---- developing the UI ------------------------------------------------------
+make api                    # FastAPI with --reload; OpenAPI docs at :8000/docs
+make web                    # Vite dev server on :5173, proxying /api to :8000
 
 # ---- knowledge / RAG --------------------------------------------------------
 make knowledge              # register → (human approves) → load → chunk → embed
@@ -784,8 +867,17 @@ vrr_agent_open/
 │   │   └── text_splitters.py   #    fixed vs recursive vs semantic + retrieval_check
 │   ├── evaluation/             # 6 deterministic scorers + 3 judges
 │   ├── prompts/templates.py    # the 4 versioned prompts
-│   ├── app/streamlit_app.py    # 4 tabs + the docked chat drawer
+│   ├── api/                    # 🌐 FastAPI — the workbench backend
+│   │   ├── main.py             #    app, CORS, health, serves web/dist in prod
+│   │   ├── routes_patterns.py  #    reads: overview · trend · decompose · audit · lineage
+│   │   ├── routes_approvals.py #    the chain — ROLE CHECKS ENFORCED SERVER-SIDE
+│   │   └── routes_chat.py      #    one gated answer per request + the transcript
 │   └── governance/uc_register.py
+├── web/                        # ⚛️ React + Vite + TypeScript + Tailwind
+│   ├── src/api.ts              #    the typed client — the only place it calls HTTP
+│   ├── src/App.tsx             #    shell: sidebar filters + view routing
+│   ├── src/views/              #    Portfolio · Report · Lineage · Approval
+│   └── src/components/         #    ChatDrawer + shared primitives
 ├── data/evaluation/            # the 11 authored cases + their expectations
 ├── scripts/                    # traces · eval · prompts · judges · floor · llm-check
 ├── tests/                      # 129 tests, all off-DB
@@ -803,7 +895,7 @@ vrr_agent_open/
 | Postgres schema + seed + build | ✅ verified end to end (272,880 contrib → 1,440 monthly rows) |
 | LangGraph agent + 15 tools | ✅ a real `StateGraph`; every path tested with the model stubbed |
 | Faithfulness gate | ✅ catches wrong drivers, wrong directions, uncited numbers |
-| Streamlit workbench + approval | ✅ 4 tabs, role-gated execution, durable shared chat |
+| React workbench + FastAPI | ✅ 4 views, docked chat, **role checks enforced server-side** (403-verified) |
 | RAG (load → chunk → embed → search) | ✅ 4 docs / 35 chunks ingested; chunking + floor both **measured** |
 | Abstention ("I don't know") | ✅ floor 0.62, model not called, guarded by an eval case |
 | Providers (Ollama / OpenAI / Anthropic) | 🔶 local verified; **hosted unverified — no API key on the dev machine** |

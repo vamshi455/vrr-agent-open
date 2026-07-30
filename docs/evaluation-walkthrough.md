@@ -164,7 +164,7 @@ make eval
 > only ever go through the Makefile. `make eval` is `--eval-only`, which filters to
 > `tags.eval_case != ''` — i.e. *only* the traces this harness just produced. Running
 > `scripts/evaluate_model.py` bare grades the last 50 traces of *any* origin (your
-> Streamlit clicking, an older question set), so the denominators shift and two runs stop
+> workbench clicking, an older question set), so the denominators shift and two runs stop
 > being comparable.
 
 ### 5a. The six mechanical checks (always run, no LLM, free, exact)

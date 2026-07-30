@@ -253,7 +253,7 @@ CREATE TABLE IF NOT EXISTS vrr_agent.knowledge_registry (
   doc_id text PRIMARY KEY, file_name text, status text DEFAULT 'pending_review',
   reviewed_by text, pii_found boolean, pii_kinds text, n_chunks int, registered_at timestamptz DEFAULT now()
 );
--- Analyst chat transcript. One row per question+answer turn asked in the Streamlit chat
+-- Analyst chat transcript. One row per question+answer turn asked in the chat drawer
 -- drawer, scoped by pattern and SHARED across users: opening a pattern shows what anyone
 -- already asked about it, so a review is not restarted from zero. Written only by the app
 -- (agent/history.py) and never by chat.respond(), so evaluation runs (make traces) do not

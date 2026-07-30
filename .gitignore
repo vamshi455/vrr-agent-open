@@ -12,3 +12,6 @@ mlruns/
 knowledge_uploads/
 mlflow.db
 mlartifacts/
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
