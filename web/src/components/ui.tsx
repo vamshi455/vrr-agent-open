@@ -154,13 +154,20 @@ export function provenanceLine(intent: string | undefined, meta: ChatMeta = {}):
   const gate = meta.gate ?? "";
   const model = meta.model ?? "LLM";
   let phrasing: string;
-  if (!meta.llm) phrasing = "computed wording, no LLM";
+  // Two very different reasons an answer has no LLM in it, and conflating them reads as
+  // a broken model when nothing is wrong:
+  //   gate "skipped (no local LLM running)"  → Ollama really is down
+  //   no gate at all                         → this INTENT never uses a model. Lineage,
+  //     portfolio, completions and data-quality answers are assembled from tool output
+  //     by design; there is no prose for a model to write.
+  if (!meta.llm && gate.startsWith("skipped"))
+    phrasing = "⚪ no model running — computed answer";
+  else if (!meta.llm) phrasing = "✅ deterministic answer — no model needed";
   else if (gate.startsWith("REJECTED"))
     phrasing = `⚠️ ${model} phrasing rejected — computed wording shown`;
   else if (gate.includes("abstained")) phrasing = "abstained — nothing above the retrieval floor";
   else if (gate.includes("repair")) phrasing = `${model} phrasing · ✅ gate passed after one repair`;
   else if (gate.startsWith("n/a")) phrasing = `${model} · no field figures to verify`;
-  else if (gate.startsWith("skipped")) phrasing = "computed wording — LLM unavailable";
   else phrasing = `${model} phrasing · ✅ gate passed`;
   const tools = meta.tools_called?.length ? ` · tools: ${meta.tools_called.join(", ")}` : "";
   return `${source} · ${phrasing}${tools}`;
