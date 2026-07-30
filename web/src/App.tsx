@@ -97,9 +97,13 @@ export default function App() {
   const shared = { patternId, period, trend, role, user };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+    // h-screen + overflow-hidden pins the shell to the viewport, so each of the three
+    // columns scrolls INSIDE itself. With min-h-screen the page grew as the transcript
+    // grew, which pushed the chat input off the bottom — the box you type in must not
+    // move because the conversation got longer.
+    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900">
       {/* ---------------------------------------------------------- sidebar */}
-      <aside className="w-64 shrink-0 border-r border-slate-200 bg-white p-4">
+      <aside className="w-64 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-4">
         <h1 className="text-base font-semibold">🛢️ VRR — Open</h1>
         <p className="mt-0.5 text-xs text-slate-500">Reasoning &amp; lineage workbench</p>
 
@@ -188,7 +192,7 @@ export default function App() {
       </aside>
 
       {/* ------------------------------------------------------------- main */}
-      <main className="min-w-0 flex-1 p-6">
+      <main className="min-w-0 flex-1 overflow-y-auto p-6">
         {view === "portfolio" && <PortfolioView onPick={setPatternId} />}
         {view === "report" && <ReportView {...shared} />}
         {view === "lineage" && <LineageView {...shared} />}

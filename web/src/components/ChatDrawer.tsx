@@ -34,7 +34,7 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
   const [input, setInput] = useState("");
   const [agentic, setAgentic] = useState(false);
   const [busy, setBusy] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!patternId) return;
@@ -47,7 +47,15 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
       .catch(() => setTurns([]));
   }, [patternId]);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [turns.length, busy]);
+  // Stick to the newest turn as it arrives, but only if the reader is already near the
+  // bottom — yanking the view while someone is re-reading an earlier answer is worse
+  // than making them scroll.
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 160;
+    if (nearBottom || busy) box.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+  }, [turns.length, busy]);
 
   async function ask(question: string) {
     if (!question.trim() || busy) return;
@@ -94,8 +102,11 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
   }
 
   return (
-    <aside className="flex w-[26rem] shrink-0 flex-col border-l border-slate-200 bg-white">
-      <header className="flex items-start justify-between border-b border-slate-100 p-3">
+    // h-full + min-h-0: the aside fills the viewport-height shell, and min-h-0 lets the
+    // transcript below actually shrink. Without it a flex child refuses to go below its
+    // content height, the column grows past the viewport, and the input walks off-screen.
+    <aside className="flex h-full min-h-0 w-[26rem] shrink-0 flex-col border-l border-slate-200 bg-white">
+      <header className="flex shrink-0 items-start justify-between border-b border-slate-100 p-3">
         <div>
           <h2 className="text-sm font-semibold">💬 Ask about {patternName}</h2>
           <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
@@ -107,7 +118,7 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
                 aria-label="Close chat">✕</button>
       </header>
 
-      <div className="border-b border-slate-100 p-3">
+      <div className="shrink-0 border-b border-slate-100 p-3">
         <label className="flex items-center gap-2 text-xs text-slate-600">
           <input type="checkbox" checked={agentic} disabled={!llmUp}
                  onChange={(e) => setAgentic(e.target.checked)} />
@@ -128,16 +139,18 @@ export function ChatDrawer({ patternId, patternName, period, user, vsTarget, llm
         </div>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-3">
+      {/* The only scrolling region in the drawer. min-h-0 is what makes overflow work
+          inside a flex column; flex-1 gives it whatever height the header, the quick
+          questions and the composer leave over. */}
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
         {turns.length === 0 && (
           <p className="text-xs text-slate-400">Nothing asked about this pattern yet.</p>
         )}
         {turns.map((t, i) => <TurnBlock key={i} turn={t} />)}
-        <div ref={endRef} />
       </div>
 
       <form
-        className="border-t border-slate-100 p-3"
+        className="shrink-0 border-t border-slate-100 p-3"
         onSubmit={(e) => { e.preventDefault(); ask(input); }}
       >
         <input
