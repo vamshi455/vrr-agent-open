@@ -14,7 +14,7 @@ import {
 import {
   api, type AnalysisCase, type Decompose, type PatternContext, type TrendRow,
 } from "../api";
-import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, chartType, fmt } from "../components/ui";
+import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, CHART_AXIS, CHART_TOOLTIP, fmt } from "../components/ui";
 import { PatternDiagram } from "../components/PatternDiagram";
 
 interface Props {
@@ -84,7 +84,7 @@ export function ReportView({ patternId, period, trend }: Props) {
         <h1 className="text-title font-semibold">
           {ctx.pattern_name} — VRR {fmt.vrr(sel.vrr)} on {fmt.month(period)}
         </h1>
-        <p className="mt-0.5 text-label text-slate-500">
+        <p className="mt-0.5 text-label text-content-muted">
           id_pattern <code className="font-mono">{ctx.pattern_id}</code>
           {ctx.asset && <> · asset {ctx.asset}</>}
         </p>
@@ -133,29 +133,29 @@ export function ReportView({ patternId, period, trend }: Props) {
       >
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={trend} margin={{ left: -10, right: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-            <XAxis dataKey="vrr_date" tick={{ fontSize: chartType.tick }}
+            <CartesianGrid strokeDasharray="3 3" stroke="#232e3d" />
+            <XAxis dataKey="vrr_date" tick={CHART_AXIS}
                    tickFormatter={(d: string) => fmt.month(d)} minTickGap={28} />
             {/* The domain must always contain the band and the target, not just the
                 data. On a pattern sitting at 1.38 an auto-scaled axis drops the 0.90–1.10
                 band off-screen entirely — and "how far off target is it" is the only
                 question this chart exists to answer. */}
-            <YAxis domain={yDomain} tick={{ fontSize: chartType.tick }} width={56}
+            <YAxis domain={yDomain} tick={CHART_AXIS} width={56}
                    tickFormatter={(v: number) => v.toFixed(2)} />
             <Tooltip
-              contentStyle={{ fontSize: chartType.tooltip }}
+              contentStyle={CHART_TOOLTIP}
               labelFormatter={(d) => fmt.month(String(d))}
               formatter={(v: number, n: string) =>
                 [n === "vrr" ? v.toFixed(3) : Math.round(v).toLocaleString(), n]}
             />
-            <ReferenceArea y1={band[0]} y2={band[1]} fill="#2ca02c" fillOpacity={0.08} />
-            <ReferenceLine y={ctx.target_vrr} stroke="#2ca02c" strokeDasharray="6 4" />
-            <ReferenceLine x={period} stroke="#d62728" strokeDasharray="3 3" />
-            <Line type="monotone" dataKey="vrr" stroke="#1f77b4" strokeWidth={2}
+            <ReferenceArea y1={band[0]} y2={band[1]} fill="#4fc47f" fillOpacity={0.10} />
+            <ReferenceLine y={ctx.target_vrr} stroke="#4fc47f" strokeDasharray="6 4" />
+            <ReferenceLine x={period} stroke="#f2777a" strokeDasharray="3 3" />
+            <Line type="monotone" dataKey="vrr" stroke="#5aa9dd" strokeWidth={2}
                   dot={(props: { cx?: number; cy?: number; payload?: TrendRow; index?: number }) =>
                     props.payload?.any_extrapolated
-                      ? <circle key={props.index} cx={props.cx} cy={props.cy} r={4} fill="#ff7f0e" />
-                      : <circle key={props.index} cx={props.cx} cy={props.cy} r={2} fill="#1f77b4" />} />
+                      ? <circle key={props.index} cx={props.cx} cy={props.cy} r={4} fill="#e0a83a" />
+                      : <circle key={props.index} cx={props.cx} cy={props.cy} r={2} fill="#5aa9dd" />} />
           </ComposedChart>
         </ResponsiveContainer>
       </Card>
@@ -165,29 +165,29 @@ export function ReportView({ patternId, period, trend }: Props) {
         sub="Exact log-mean (LMDI) split — the contributions sum to ΔVRR, to machine precision."
       >
         {!prev ? (
-          <p className="text-body text-slate-500">No prior period to attribute against.</p>
+          <p className="text-body text-content-muted">No prior period to attribute against.</p>
         ) : !dec ? (
           <Spinner label="decomposing…" />
         ) : !dec.ok ? (
-          <p className="text-body text-slate-500">{dec.reason ?? "no attribution"}</p>
+          <p className="text-body text-content-muted">{dec.reason ?? "no attribution"}</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
             <div className="col-span-2 text-body">
               <p className="font-medium">
                 {fmt.month(prev.vrr_date)} → {fmt.month(period)}
               </p>
-              <p className="mt-1 tabular-nums text-slate-700">
+              <p className="mt-1 tabular-nums text-content-secondary">
                 VRR {fmt.vrr(dec.vrr_a)} → {fmt.vrr(dec.vrr_b)}{" "}
                 (<strong>{fmt.signed(dec.d_vrr, 3)}</strong>)
               </p>
-              <p className="mt-1 text-label text-slate-500">
+              <p className="mt-1 text-label text-content-muted">
                 Injection side {fmt.signed(dec.side_contributions.injection)} · production
                 side {fmt.signed(dec.side_contributions.production)}
               </p>
               <ul className="mt-3 space-y-1 text-label tabular-nums">
                 {dec.drivers.map((d) => (
                   <li key={d.term} className="flex justify-between gap-3">
-                    <span className="text-slate-600">{d.label}</span>
+                    <span className="text-content-secondary">{d.label}</span>
                     <span className={d.contribution >= 0 ? "text-offtarget" : "text-signal"}>
                       {fmt.signed(d.contribution)} ({fmt.pct(d.share)})
                     </span>
@@ -198,10 +198,10 @@ export function ReportView({ patternId, period, trend }: Props) {
             <div className="col-span-3">
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={dec.drivers} layout="vertical" margin={{ left: 30, right: 12 }}>
-                  <XAxis type="number" tick={{ fontSize: chartType.tick }}
+                  <XAxis type="number" tick={CHART_AXIS}
                          tickFormatter={(v: number) => v.toFixed(3)} />
-                  <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: chartType.tick }} />
-                  <Tooltip formatter={(v: number) => fmt.signed(v)} contentStyle={{ fontSize: chartType.tooltip }} />
+                  <YAxis type="category" dataKey="label" width={110} tick={CHART_AXIS} />
+                  <Tooltip formatter={(v: number) => fmt.signed(v)} contentStyle={CHART_TOOLTIP} />
                   <Bar dataKey="contribution">
                     {dec.drivers.map((d) => (
                       <Cell key={d.term} fill={d.contribution >= 0 ? "#d62728" : "#2ca02c"} />
@@ -221,10 +221,10 @@ export function ReportView({ patternId, period, trend }: Props) {
         {!analysis ? (
           <Spinner label="running verify → attribute → classify → propose…" />
         ) : !analysis.ok ? (
-          <p className="text-body text-slate-500">{analysis.reason}</p>
+          <p className="text-body text-content-muted">{analysis.reason}</p>
         ) : (
           <>
-            <pre className="whitespace-pre-wrap rounded bg-slate-50 p-3 text-label leading-relaxed text-slate-800">
+            <pre className="whitespace-pre-wrap rounded bg-surface-raised p-3 text-label leading-relaxed text-content-primary">
               {analysis.narrative}
             </pre>
             {analysis.draft ? (
@@ -232,7 +232,7 @@ export function ReportView({ patternId, period, trend }: Props) {
                 <button
                   onClick={submit}
                   disabled={busy || !!submitted}
-                  className="rounded bg-slate-900 px-3 py-1.5 text-body text-white disabled:opacity-40"
+                  className="rounded bg-brand-500 px-3 py-1.5 text-body font-medium text-surface-base disabled:opacity-40"
                 >
                   {busy ? "submitting…" : "📤 Submit to approval queue (draft → analyst)"}
                 </button>
@@ -245,7 +245,7 @@ export function ReportView({ patternId, period, trend }: Props) {
                 {submitted && <Banner tone="good" title={submitted} />}
               </div>
             ) : (
-              <p className="mt-3 text-body text-slate-500">
+              <p className="mt-3 text-body text-content-muted">
                 No anomaly fired for this period — nothing to draft.
               </p>
             )}

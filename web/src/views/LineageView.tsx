@@ -39,7 +39,7 @@ export function LineageView({ patternId, period }: Props) {
         <h1 className="text-title font-semibold">
           How the {fmt.month(period)} VRR was computed
         </h1>
-        <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
+        <p className="mt-1 max-w-3xl text-label leading-relaxed text-content-muted">
           Recomputed independently in this request from{" "}
           <code className="font-mono">{audit.provenance?.recomputed_from?.join(", ")}</code>{" "}
           via <code className="font-mono">{audit.provenance?.code}</code> — not read back
@@ -58,11 +58,11 @@ export function LineageView({ patternId, period }: Props) {
                     tone={audit.matches ? "good" : "bad"}
                     foot={<span className="inline-flex items-center gap-1">
                       <StatusIcon kind={audit.matches ? "ok" : "warn"}
-                                  className={audit.matches ? "text-signal" : "text-suspect-text"} />
+                                  className={audit.matches ? "text-signal" : "text-suspect"} />
                       {audit.matches ? "verified" : "mismatch"}
                     </span>} />
           </div>
-          <p className="text-label text-slate-500">
+          <p className="text-label text-content-muted">
             PVT lookup methods in this period:{" "}
             {audit.pvt_methods.map((m) => (
               <span key={m} className="mr-1">
@@ -70,7 +70,7 @@ export function LineageView({ patternId, period }: Props) {
               </span>
             ))}
             {audit.low_confidence_inputs && (
-              <span className="text-suspect-text"> <StatusIcon kind="warn" /> low-confidence — no valve change may be
+              <span className="text-suspect"> <StatusIcon kind="warn" /> low-confidence — no valve change may be
                 proposed on this period</span>
             )}
           </p>
@@ -85,8 +85,8 @@ export function LineageView({ patternId, period }: Props) {
       </Card>
 
       <details className="group">
-        <summary className="cursor-pointer list-none rounded-lg border border-slate-200 bg-white
-                            px-4 py-2.5 text-label text-slate-600 shadow-card hover:bg-slate-50">
+        <summary className="cursor-pointer list-none rounded-lg border border-surface-border bg-surface-card
+                            px-4 py-2.5 text-label text-content-secondary shadow-card hover:bg-surface-raised">
           <span className="group-open:hidden">Show</span>
           <span className="hidden group-open:inline">Hide</span>{" "}
           the rows behind the graph — per-completion inputs and the roll-up
@@ -106,7 +106,7 @@ export function LineageView({ patternId, period }: Props) {
           inj_res_bbl: lin.recomputed_from_terms.inj_res_bbl,
           vrr: lin.recomputed_from_terms.vrr,
         }]} />
-        <p className="mt-2 text-label text-slate-500">
+        <p className="mt-2 text-label text-content-muted">
           Unity Catalog OSS registers these tables as the catalog-of-record, so this chain
           is also visible as table-level lineage (<code className="font-mono">make register</code>).
         </p>

@@ -108,7 +108,7 @@ export default function App() {
   const shared = { patternId, period, trend };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900">
+    <div className="flex h-screen flex-col overflow-hidden bg-surface-raised text-content-primary">
       <Header
         me={me}
         health={health}
@@ -120,7 +120,7 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* ------------------------------------------------------- filter rail */}
-        <aside className="flex shrink-0 flex-col border-b border-slate-200 bg-white px-3 py-3
+        <aside className="flex shrink-0 flex-col border-b border-surface-border bg-surface-card px-3 py-3
                           lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:py-4">
           <nav className="flex gap-1 overflow-x-auto lg:block lg:space-y-0.5">
             {VIEWS.map((v) => (
@@ -130,8 +130,8 @@ export default function App() {
                 title={v.hint}
                 className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-body transition lg:block lg:w-full ${
                   view === v.id
-                    ? "bg-brand-600 font-medium text-white"
-                    : "text-slate-600 hover:bg-slate-100"
+                    ? "bg-brand-500 font-medium text-surface-base"
+                    : "text-content-secondary hover:bg-surface-raised"
                 }`}
               >
                 {v.label}
@@ -139,7 +139,7 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 lg:mt-5 lg:grid-cols-1 lg:space-y-3 lg:pt-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-surface-divider pt-3 lg:mt-5 lg:grid-cols-1 lg:space-y-3 lg:pt-4">
             <Field label="Pattern">
               <select value={patternId} onChange={(e) => setPatternId(e.target.value)}
                       className={selectClass}>
@@ -162,7 +162,7 @@ export default function App() {
             </Field>
           </div>
 
-          <div className="mt-auto hidden space-y-1.5 border-t border-slate-100 pt-4 text-micro text-slate-500 lg:block">
+          <div className="mt-auto hidden space-y-1.5 border-t border-surface-divider pt-4 text-micro text-content-muted lg:block">
             <p>
               Postgres <code className="font-mono">{health?.postgres.host ?? "—"}</code>
             </p>
@@ -208,13 +208,13 @@ export default function App() {
 }
 
 const selectClass =
-  "w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-label " +
-  "text-slate-800 focus:border-brand-500";
+  "w-full rounded-md border border-surface-border bg-surface-card px-2 py-1 text-label " +
+  "text-content-primary focus:border-brand-500";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-micro font-medium uppercase tracking-wide text-slate-500">
+      <span className="mb-1 block text-micro font-medium uppercase tracking-wide text-content-muted">
         {label}
       </span>
       {children}

@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { api, type Overview } from "../api";
 import {
-  Badge, Card, DataTable, ErrorNote, Metric, Spinner, chartType,
+  Badge, Card, DataTable, ErrorNote, Metric, Spinner, CHART_AXIS, CHART_TOOLTIP,
 } from "../components/ui";
 
 export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
@@ -44,7 +44,7 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
     <div className="space-y-4">
       <header>
         <h1 className="text-title font-semibold">Portfolio — where to look first</h1>
-        <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
+        <p className="mt-1 max-w-3xl text-label leading-relaxed text-content-muted">
           Every pattern's latest VRR against its target, ranked by absolute drift
           (<code className="font-mono">VRR_OVERVIEW</code> over{" "}
           <code className="font-mono">vrr_curated.pattern_vrr</code>). Amber = built on
@@ -55,14 +55,14 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
 
       <div className="flex items-center gap-3">
         <select
-          className="rounded border border-slate-300 bg-white px-2 py-1.5 text-body"
+          className="rounded border border-surface-border bg-surface-card px-2 py-1.5 text-body"
           value={asset}
           onChange={(e) => setAsset(e.target.value)}
         >
           {["all assets", ...assets].map((a) => <option key={a}>{a}</option>)}
         </select>
         {Object.keys(audits).length > 0 && (
-          <p className="text-label text-slate-500">
+          <p className="text-label text-content-muted">
             Input-audit verdicts:{" "}
             {Object.entries(audits).map(([k, v]) => (
               <span key={k} className="mr-2">
@@ -84,15 +84,15 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
       <Card title="Drift from target" sub="Top 20 by |VRR − target|. Click a bar to open that pattern.">
         <ResponsiveContainer width="100%" height={Math.max(260, top.length * 26)}>
           <BarChart data={top} layout="vertical" margin={{ left: 90, right: 16 }}>
-            <XAxis type="number" tick={{ fontSize: chartType.tick }} />
+            <XAxis type="number" tick={CHART_AXIS} />
             {/* interval={0} or Recharts drops every other label — and an unlabelled bar
                 in a "where do I look first" chart is a bar you cannot act on. */}
-            <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: chartType.tick }}
+            <YAxis type="category" dataKey="name" width={90} tick={CHART_AXIS}
                    interval={0} />
             <Tooltip
               formatter={(v: number) => v.toFixed(4)}
               labelFormatter={(l) => `${l}`}
-              contentStyle={{ fontSize: chartType.tooltip }}
+              contentStyle={CHART_TOOLTIP}
             />
             <Bar dataKey="drift" onClick={(d: { id_pattern?: string }) => d.id_pattern && onPick(d.id_pattern)}>
               {top.map((p) => (
@@ -124,7 +124,7 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
         }
       >
         {!showDq ? (
-          <p className="text-label text-slate-500">
+          <p className="text-label text-content-muted">
             {dq?.ok ? `All ${dq.checks_run.length} checks clean.`
                     : `${dq?.n_findings ?? "—"} finding(s).`} Click to expand.
           </p>

@@ -21,11 +21,11 @@ import { api, type LayoutNode, type PatternLayout } from "../api";
 import { Badge, Card, Spinner, fmt } from "./ui";
 
 const C = {
-  injector: "#2d6b91",   // brand — water going down
-  producer: "#2f855a",   // signal — oil coming up
-  idle: "#94a3b8",
-  suspect: "#b7791f",
-  sweep: "#7ba7c4",
+  injector: "#5aa9dd",   // brand — water going down
+  producer: "#4fc47f",   // signal — oil coming up
+  idle: "#8b9db0",
+  suspect: "#e0a83a",
+  sweep: "#5aa9dd",
 } as const;
 
 /** Rendered pixels per viewBox unit. Fixed so the caption at 8.5 units always lands at
@@ -55,7 +55,7 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
   if (!data.found || !data.nodes?.length) {
     return (
       <Card title="Pattern layout" sub="No completions contributed in this period.">
-        <p className="text-body text-slate-500">Nothing to draw for {fmt.month(period)}.</p>
+        <p className="text-body text-content-muted">Nothing to draw for {fmt.month(period)}.</p>
       </Card>
     );
   }
@@ -98,7 +98,7 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
                   producers. Suggestive shading, not a saturation map — it has no
                   contour lines for exactly that reason. */}
               <radialGradient id="sweep-area">
-                <stop offset="0%" stopColor={C.injector} stopOpacity="0.16" />
+                <stop offset="0%" stopColor={C.injector} stopOpacity="0.20" />
                 <stop offset="55%" stopColor={C.injector} stopOpacity="0.07" />
                 <stop offset="100%" stopColor={C.injector} stopOpacity="0" />
               </radialGradient>
@@ -153,8 +153,8 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
         <FluidBalance data={data} />
       </div>
 
-      <p className="mt-4 border-t border-slate-100 pt-3 text-label leading-relaxed text-slate-500">
-        <strong className="font-medium text-slate-600">Schematic, not a map.</strong>{" "}
+      <p className="mt-4 border-t border-surface-divider pt-3 text-label leading-relaxed text-content-muted">
+        <strong className="font-medium text-content-secondary">Schematic, not a map.</strong>{" "}
         Wells are placed by contribution factor — a producer drawn closer to the injector
         gives this pattern a larger share of its volumes. The database holds no well
         coordinates, surveys or perforation depths, so no distance here is in feet.
@@ -190,7 +190,7 @@ function Well({ n, dim, onHover }: {
                 strokeWidth="1.2" strokeDasharray="3 3" />
       )}
       <circle cx={n.x} cy={n.y} r={r} fill={fill} fillOpacity={n.role === "idle" ? 0.25 : 1}
-              stroke={n.low_confidence ? C.suspect : "#fff"}
+              stroke={n.low_confidence ? C.suspect : "#18212d"}
               strokeWidth={n.low_confidence ? 2.5 : 2} />
 
       {/* Down into the ground for injection, up out of it for production — the one
@@ -198,21 +198,21 @@ function Well({ n, dim, onHover }: {
       <path
         d={n.role === "injector" ? arrow(n.x, n.y, r, 1)
           : n.role === "producer" ? arrow(n.x, n.y, r, -1) : ""}
-        stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"
+        stroke="#0b1219" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"
       />
       {n.role === "idle" && (
-        <line x1={n.x - 4} y1={n.y} x2={n.x + 4} y2={n.y} stroke="#fff" strokeWidth="2" />
+        <line x1={n.x - 4} y1={n.y} x2={n.x + 4} y2={n.y} stroke="#0b1219" strokeWidth="2" />
       )}
 
       {/* Caption above the wells in the top half, below the ones underneath: every sweep
           line runs outward from the centre, so a label on the centre side of its well
           always has a line through it. */}
       <text x={n.x} y={above(n) ? n.y - o - 14 : n.y + o + 11} textAnchor="middle"
-            className="fill-slate-700 font-medium" style={{ fontSize: 8.5, ...HALO }}>
+            className="fill-content-secondary font-medium" style={{ fontSize: 8.5, ...HALO }}>
         {n.completion_name}
       </text>
       <text x={n.x} y={above(n) ? n.y - o - 3 : n.y + o + 22} textAnchor="middle"
-            className="fill-slate-500" style={{ fontSize: 8.2, ...HALO }}>
+            className="fill-content-muted" style={{ fontSize: 8.2, ...HALO }}>
         {n.role === "idle" ? "idle" : `f ${n.factor.toFixed(2)} · ${fmt.pct(n.share)}`}
       </text>
     </g>
@@ -230,7 +230,9 @@ function arrow(x: number, y: number, r: number, dir: 1 | -1) {
 /** A white knock-out behind label text. The injector sits at the centre with sweep
  *  lines radiating in every direction, so there is no side its caption can be moved to
  *  that a line does not cross — the label has to defend itself instead. */
-const HALO = { stroke: "#fff", strokeWidth: 2.6, paintOrder: "stroke" } as const;
+// Knock-out in the CARD colour, not white — on a dark card a white halo turns every
+// caption into a glowing smear.
+const HALO = { stroke: "#18212d", strokeWidth: 2.6, paintOrder: "stroke" } as const;
 
 /** Producers in the upper half wear their caption above; everything else below. */
 const above = (n: LayoutNode) => n.y < -12;
@@ -284,12 +286,12 @@ function Legend() {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
       {items.map(([colour, label, note]) => (
-        <span key={label} className="flex items-center gap-1.5 text-micro text-slate-500">
+        <span key={label} className="flex items-center gap-1.5 text-micro text-content-muted">
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: colour }} />
-          <span className="font-medium text-slate-600">{label}</span> {note}
+          <span className="font-medium text-content-secondary">{label}</span> {note}
         </span>
       ))}
-      <span className="text-micro text-slate-500">
+      <span className="text-micro text-content-muted">
         line weight = contribution factor · circle area = share of volume
       </span>
     </div>
@@ -307,18 +309,18 @@ function FluidBalance({ data }: { data: PatternLayout }) {
   const scale = Math.max(inj, prod) || 1;
   const putBack = Math.round(vrr * 100);
   const tone = vrr >= 0.95 && vrr <= 1.05 ? "signal" : vrr < 0.95 ? "offtarget" : "suspect";
-  const toneHex = { signal: "#2f855a", offtarget: "#c53030", suspect: "#b7791f" }[tone];
+  const toneHex = { signal: "#4fc47f", offtarget: "#f2777a", suspect: "#e0a83a" }[tone];
 
   return (
-    <div className="self-start rounded-lg bg-slate-50 p-4">
-      <div className="text-micro font-medium uppercase tracking-wide text-slate-500">
+    <div className="self-start rounded-lg bg-surface-raised p-4">
+      <div className="text-micro font-medium uppercase tracking-wide text-content-muted">
         The balance, in plain terms
       </div>
-      <p className="mt-2 text-sub leading-snug text-slate-800">
+      <p className="mt-2 text-sub leading-snug text-content-primary">
         For every <strong>100 barrels</strong> of space emptied in the rock,{" "}
         <strong style={{ color: toneHex }}>{putBack} barrels</strong> were put back.
       </p>
-      <p className="mt-1 text-label leading-relaxed text-slate-500">
+      <p className="mt-1 text-label leading-relaxed text-content-muted">
         {vrr < 0.95
           ? "Less goes in than comes out, so pressure falls and the reservoir gives up oil more slowly."
           : vrr > 1.05
@@ -331,7 +333,7 @@ function FluidBalance({ data }: { data: PatternLayout }) {
         <Bar label="Taken out — production" value={prod} scale={scale} colour={C.producer} />
       </div>
 
-      <p className="mt-4 text-label leading-relaxed text-slate-500">
+      <p className="mt-4 text-label leading-relaxed text-content-muted">
         Both measured <em>down in the reservoir</em>, not at surface — a barrel of oil
         shrinks on the way up, so surface barrels would not compare. That conversion is
         the PVT step, and it is why the amber rings above matter.
@@ -346,10 +348,10 @@ function Bar({ label, value, scale, colour }: {
   return (
     <div>
       <div className="flex items-baseline justify-between text-micro">
-        <span className="text-slate-600">{label}</span>
-        <span className="tabular-nums font-medium text-slate-800">{fmt.bbl(value)} bbl</span>
+        <span className="text-content-secondary">{label}</span>
+        <span className="tabular-nums font-medium text-content-primary">{fmt.bbl(value)} bbl</span>
       </div>
-      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-slate-200">
+      <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-surface-raised">
         <div className="h-full rounded-full transition-all"
              style={{ width: `${Math.max(2, (value / scale) * 100)}%`, background: colour }} />
       </div>

@@ -48,27 +48,27 @@ export function Login({ onSignedIn, onCancel, reason }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
       <form onSubmit={submit}
-            className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 shadow-lg">
+            className="w-full max-w-sm rounded-lg border border-surface-border bg-surface-card p-6 shadow-lg">
         <h2 className="text-base font-semibold">🛢️ Sign in</h2>
-        <p className="mt-1 text-label leading-relaxed text-slate-500">
+        <p className="mt-1 text-label leading-relaxed text-content-muted">
           {reason ?? "Reading is open. Asking the agent and moving an approval need an account — your role comes from it."}
         </p>
 
         {error && <div className="mt-3"><Banner tone="bad" title={error} /></div>}
 
-        <label className="mt-4 block text-label font-medium text-slate-600">Username</label>
+        <label className="mt-4 block text-label font-medium text-content-secondary">Username</label>
         <input
-          className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-body"
+          className="mt-1 w-full rounded border border-surface-border px-2 py-1.5 text-body"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoFocus
           autoComplete="username"
         />
 
-        <label className="mt-3 block text-label font-medium text-slate-600">Password</label>
+        <label className="mt-3 block text-label font-medium text-content-secondary">Password</label>
         <input
           type="password"
-          className="mt-1 w-full rounded border border-slate-300 px-2 py-1.5 text-body"
+          className="mt-1 w-full rounded border border-surface-border px-2 py-1.5 text-body"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
@@ -78,21 +78,21 @@ export function Login({ onSignedIn, onCancel, reason }: {
           <button
             type="submit"
             disabled={busy || !password}
-            className="rounded bg-slate-900 px-3 py-1.5 text-body text-white disabled:opacity-40"
+            className="rounded bg-brand-500 px-3 py-1.5 text-body font-medium text-surface-base disabled:opacity-40"
           >
             {busy ? "signing in…" : "Sign in"}
           </button>
           {onCancel && (
             <button type="button" onClick={onCancel}
-                    className="rounded border border-slate-300 px-3 py-1.5 text-body">
+                    className="rounded border border-surface-border px-3 py-1.5 text-body">
               Keep reading
             </button>
           )}
         </div>
 
-        <div className="mt-5 border-t border-slate-100 pt-3">
-          <p className="text-micro font-medium text-slate-600">Demo accounts</p>
-          <ul className="mt-1 space-y-0.5 text-micro text-slate-500">
+        <div className="mt-5 border-t border-surface-divider pt-3">
+          <p className="text-micro font-medium text-content-secondary">Demo accounts</p>
+          <ul className="mt-1 space-y-0.5 text-micro text-content-muted">
             {DEMO.map(([name, what]) => (
               <li key={name}>
                 <button type="button" onClick={() => setUsername(name)}
@@ -100,7 +100,7 @@ export function Login({ onSignedIn, onCancel, reason }: {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-micro text-slate-500">
+          <p className="mt-2 text-micro text-content-muted">
             Seed them with <code className="font-mono">make users</code>, which prints the
             password it set.
           </p>

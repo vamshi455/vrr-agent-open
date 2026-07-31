@@ -13,11 +13,11 @@ export function Card({ title, sub, children, className = "" }: {
   title?: ReactNode; sub?: ReactNode; children: ReactNode; className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-slate-200 bg-white shadow-card ${className}`}>
+    <section className={`rounded-lg border border-surface-border bg-surface-card shadow-card ${className}`}>
       {(title || sub) && (
-        <header className="border-b border-slate-100 px-4 py-3">
-          {title && <h2 className="text-sub font-semibold text-slate-800">{title}</h2>}
-          {sub && <p className="mt-0.5 text-label leading-relaxed text-slate-500">{sub}</p>}
+        <header className="border-b border-surface-divider px-4 py-3">
+          {title && <h2 className="text-sub font-semibold text-content-primary">{title}</h2>}
+          {sub && <p className="mt-0.5 text-label leading-relaxed text-content-muted">{sub}</p>}
         </header>
       )}
       <div className="p-4">{children}</div>
@@ -30,13 +30,13 @@ export function Metric({ label, value, foot, tone = "plain" }: {
   tone?: "plain" | "good" | "warn" | "bad";
 }) {
   const toneClass = {
-    plain: "text-slate-900", good: "text-signal", warn: "text-suspect", bad: "text-offtarget",
+    plain: "text-content-primary", good: "text-signal", warn: "text-suspect", bad: "text-offtarget",
   }[tone];
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-card">
-      <div className="text-micro font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    <div className="rounded-lg border border-surface-border bg-surface-card px-4 py-3 shadow-card">
+      <div className="text-micro font-medium uppercase tracking-wide text-content-muted">{label}</div>
       <div className={`mt-1 text-display font-semibold tabular-nums ${toneClass}`}>{value}</div>
-      {foot && <div className="mt-0.5 text-micro text-slate-500">{foot}</div>}
+      {foot && <div className="mt-0.5 text-micro text-content-muted">{foot}</div>}
     </div>
   );
 }
@@ -45,10 +45,10 @@ export function Banner({ tone, title, children }: {
   tone: "good" | "warn" | "bad" | "info"; title: ReactNode; children?: ReactNode;
 }) {
   const styles = {
-    good: "border-green-200 bg-green-50 text-green-900",
-    warn: "border-amber-200 bg-amber-50 text-amber-900",
-    bad: "border-red-200 bg-red-50 text-red-900",
-    info: "border-slate-200 bg-slate-50 text-slate-700",
+    good: "border-signal/40 bg-signal-soft text-signal",
+    warn: "border-suspect/40 bg-suspect-soft text-suspect",
+    bad: "border-offtarget/40 bg-offtarget-soft text-offtarget",
+    info: "border-surface-border bg-surface-raised text-content-secondary",
   }[tone];
   return (
     <div className={`rounded-lg border px-4 py-3 text-body ${styles}`}>
@@ -62,8 +62,8 @@ export function Badge({ children, tone = "slate" }: {
   children: ReactNode; tone?: "slate" | "green" | "amber" | "red";
 }) {
   const styles = {
-    slate: "bg-slate-100 text-slate-700", green: "bg-green-100 text-green-800",
-    amber: "bg-amber-100 text-amber-800", red: "bg-red-100 text-red-800",
+    slate: "bg-surface-raised text-content-secondary", green: "bg-signal-soft text-signal",
+    amber: "bg-suspect-soft text-suspect", red: "bg-offtarget-soft text-offtarget",
   }[tone];
   return (
     <span className={`inline-flex rounded px-1.5 py-0.5 text-micro font-medium ${styles}`}>
@@ -105,8 +105,8 @@ export function StatusIcon({ kind, className = "" }: {
 
 export function Spinner({ label = "loading…" }: { label?: string }) {
   return (
-    <div className="flex items-center gap-2 py-8 text-body text-slate-500">
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-slate-600" />
+    <div className="flex items-center gap-2 py-8 text-body text-content-muted">
+      <span className="h-3 w-3 animate-spin rounded-full border-2 border-surface-border border-t-content-secondary" />
       {label}
     </div>
   );
@@ -126,21 +126,21 @@ export function ErrorNote({ error }: { error: unknown }) {
 export function DataTable({ rows, max = 400 }: {
   rows: Record<string, unknown>[]; max?: number;
 }) {
-  if (!rows.length) return <p className="text-body text-slate-500">No rows.</p>;
+  if (!rows.length) return <p className="text-body text-content-muted">No rows.</p>;
   const cols = Object.keys(rows[0]);
   return (
-    <div className="overflow-auto rounded border border-slate-200" style={{ maxHeight: max }}>
+    <div className="overflow-auto rounded border border-surface-border" style={{ maxHeight: max }}>
       <table className="w-full text-label">
-        <thead className="sticky top-0 bg-slate-50 text-left text-slate-600">
+        <thead className="sticky top-0 bg-surface-raised text-left text-content-secondary">
           <tr>
             {cols.map((c) => <th key={c} className="whitespace-nowrap px-2 py-1.5 font-medium">{c}</th>)}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+            <tr key={i} className="border-t border-surface-divider hover:bg-surface-raised">
               {cols.map((c) => (
-                <td key={c} className="whitespace-nowrap px-2 py-1 tabular-nums text-slate-700">
+                <td key={c} className="whitespace-nowrap px-2 py-1 tabular-nums text-content-secondary">
                   {fmtCell(r[c])}
                 </td>
               ))}
@@ -219,6 +219,19 @@ export function violationLine(v: { kind?: string; term?: string; detail?: string
  * classes, so without this the scale silently forks the moment someone types 10.
  */
 export const chartType = { tick: 11, tooltip: 12 } as const;
+
+/** Recharts renders its tooltip as an inline-styled white box, so the theme has to be
+ *  handed to it explicitly — otherwise a white card pops up over the dark chart. */
+export const CHART_TOOLTIP = {
+  fontSize: chartType.tooltip,
+  background: "#222d3c",
+  border: "1px solid #2f3b4d",
+  borderRadius: 6,
+  color: "#e8eef5",
+} as const;
+
+/** Axis ticks and labels on the dark ground. */
+export const CHART_AXIS = { fontSize: chartType.tick, fill: "#8b9db0" } as const;
 
 export const fmt = {
   vrr: (v: number | null | undefined) => (v == null ? "—" : v.toFixed(3)),

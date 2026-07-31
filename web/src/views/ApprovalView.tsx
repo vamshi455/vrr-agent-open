@@ -15,12 +15,12 @@ import { api, type Adjustment, type Board, type QueueItem } from "../api";
 import { Badge, Banner, Card, DataTable, ErrorNote, Spinner, fmt } from "../components/ui";
 
 const LANE_STYLE: Record<string, { dot: string; head: string; ring: string }> = {
-  draft: { dot: "bg-stage-draft", head: "text-slate-600", ring: "ring-slate-200" },
-  analyst: { dot: "bg-stage-analyst", head: "text-brand-600", ring: "ring-brand-100" },
-  rm: { dot: "bg-stage-rm", head: "text-[#5b53a6]", ring: "ring-indigo-100" },
-  site: { dot: "bg-stage-site", head: "text-suspect", ring: "ring-amber-100" },
-  executed: { dot: "bg-stage-executed", head: "text-signal", ring: "ring-green-100" },
-  rejected: { dot: "bg-stage-rejected", head: "text-offtarget", ring: "ring-red-100" },
+  draft: { dot: "bg-stage-draft", head: "text-content-secondary", ring: "ring-stage-draft/30" },
+  analyst: { dot: "bg-stage-analyst", head: "text-brand-500", ring: "ring-stage-analyst/30" },
+  rm: { dot: "bg-stage-rm", head: "text-stage-rm", ring: "ring-stage-rm/30" },
+  site: { dot: "bg-stage-site", head: "text-suspect", ring: "ring-stage-site/30" },
+  executed: { dot: "bg-stage-executed", head: "text-signal", ring: "ring-stage-executed/30" },
+  rejected: { dot: "bg-stage-rejected", head: "text-offtarget", ring: "ring-stage-rejected/30" },
 };
 
 const LANE_HINT: Record<string, string> = {
@@ -74,10 +74,10 @@ export function ApprovalView({ role }: { role: string }) {
   return (
     <div className="space-y-4">
       <header>
-        <h1 className="text-title font-semibold text-slate-900">Approval board</h1>
-        <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
+        <h1 className="text-title font-semibold text-content-primary">Approval board</h1>
+        <p className="mt-1 max-w-3xl text-label leading-relaxed text-content-muted">
           {total} item(s) across the chain. The agent may only write{" "}
-          <span className="font-medium text-slate-700">draft</span>; every arrow after it
+          <span className="font-medium text-content-secondary">draft</span>; every arrow after it
           is a person. Executing writes{" "}
           <code className="font-mono">vrr_agent.adjustment_history</code>, which is what
           the ρ learning loop reads back.
@@ -100,40 +100,40 @@ export function ApprovalView({ role }: { role: string }) {
                 <h2 className={`text-label font-semibold uppercase tracking-wide ${style.head}`}>
                   {stage}
                 </h2>
-                <span className="text-label tabular-nums text-slate-500">{items.length}</span>
+                <span className="text-label tabular-nums text-content-muted">{items.length}</span>
                 {mine && (
                   <span className="ml-auto rounded bg-brand-50 px-1.5 py-0.5 text-micro font-medium text-brand-600">
                     yours
                   </span>
                 )}
               </div>
-              <p className="mb-2 h-8 text-micro leading-snug text-slate-500">
+              <p className="mb-2 h-8 text-micro leading-snug text-content-muted">
                 {LANE_HINT[stage]}
               </p>
 
-              <div className="max-h-[calc(100vh-19rem)] flex-1 space-y-2 overflow-y-auto rounded-lg bg-slate-100/70 p-2">
+              <div className="max-h-[calc(100vh-19rem)] flex-1 space-y-2 overflow-y-auto rounded-lg bg-surface-raised/70 p-2">
                 {items.length === 0 && (
-                  <p className="px-1 py-5 text-center text-micro text-slate-500">empty</p>
+                  <p className="px-1 py-5 text-center text-micro text-content-muted">empty</p>
                 )}
                 {items.map((d) => (
                   <button
                     key={d.action_id}
                     onClick={() => setOpen(d)}
-                    className={`w-full rounded-md bg-white p-2.5 text-left shadow-card ring-1 transition hover:shadow-panel ${style.ring}`}
+                    className={`w-full rounded-md bg-surface-card p-2.5 text-left shadow-card ring-1 transition hover:shadow-panel ${style.ring}`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <span className="text-label font-semibold text-slate-800">
+                      <span className="text-label font-semibold text-content-primary">
                         {d.pattern_name}
                       </span>
                       <Badge tone={d.severity === "high" ? "red" : "slate"}>
                         {d.severity}
                       </Badge>
                     </div>
-                    <p className="mt-0.5 text-micro text-slate-500">
+                    <p className="mt-0.5 text-micro text-content-muted">
                       {fmt.month(String(d.vrr_date))} · {d.action_type.replace(/_/g, " ")}
                     </p>
                     {d.driver && (
-                      <p className="mt-1 truncate font-mono text-micro text-slate-500">
+                      <p className="mt-1 truncate font-mono text-micro text-content-muted">
                         {d.driver}
                       </p>
                     )}
@@ -147,26 +147,26 @@ export function ApprovalView({ role }: { role: string }) {
 
       {/* ------------------------------------------------------- detail panel */}
       {open && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/30"
+        <div className="fixed inset-0 z-40 flex justify-end bg-black/60"
              onClick={() => setOpen(null)}>
-          <div className="h-full w-[min(34rem,100vw)] overflow-y-auto bg-white p-5 shadow-panel"
+          <div className="h-full w-[min(34rem,100vw)] overflow-y-auto bg-surface-card p-5 shadow-panel"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between">
               <div>
-                <h2 className="text-sub font-semibold text-slate-900">
+                <h2 className="text-sub font-semibold text-content-primary">
                   {open.pattern_name} · {fmt.month(String(open.vrr_date))}
                 </h2>
-                <p className="mt-0.5 text-micro text-slate-500">
+                <p className="mt-0.5 text-micro text-content-muted">
                   <code className="font-mono">{open.action_id}</code> · stage{" "}
                   <strong>{open.stage}</strong> · raised by {open.stage_by ?? "agent"}
                 </p>
               </div>
               <button onClick={() => setOpen(null)}
-                      className="rounded px-2 text-slate-500 hover:bg-slate-100">✕</button>
+                      className="rounded px-2 text-content-muted hover:bg-surface-raised">✕</button>
             </div>
 
             {open.narrative && (
-              <pre className="mt-3 whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-micro leading-relaxed text-slate-700">
+              <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface-raised p-3 text-micro leading-relaxed text-content-secondary">
                 {open.narrative}
               </pre>
             )}
@@ -176,7 +176,7 @@ export function ApprovalView({ role }: { role: string }) {
                 ? JSON.parse(open.recommendation) : open.recommendation;
               return rec?.injector_changes?.length ? (
                 <div className="mt-3">
-                  <p className="mb-1 text-label font-medium text-slate-700">
+                  <p className="mb-1 text-label font-medium text-content-secondary">
                     Proposed injector changes
                   </p>
                   <DataTable rows={rec.injector_changes} max={240} />
@@ -188,19 +188,19 @@ export function ApprovalView({ role }: { role: string }) {
               <div className="mt-4 flex gap-2">
                 <button
                   onClick={() => act(open, "advance")}
-                  className="rounded-md bg-signal px-3 py-1.5 text-body font-medium text-white hover:brightness-110"
+                  className="rounded-md bg-signal px-3 py-1.5 text-body font-medium text-surface-base hover:brightness-110"
                 >
                   Approve → {nextOf(board.order, open.stage)}
                 </button>
                 <button
                   onClick={() => act(open, "reject")}
-                  className="rounded-md border border-slate-300 px-3 py-1.5 text-body text-slate-700 hover:bg-slate-50"
+                  className="rounded-md border border-surface-border px-3 py-1.5 text-body text-content-secondary hover:bg-surface-raised"
                 >
                   Reject
                 </button>
               </div>
             ) : (
-              <p className="mt-4 rounded-md bg-slate-50 p-3 text-micro text-slate-500">
+              <p className="mt-4 rounded-md bg-surface-raised p-3 text-micro text-content-muted">
                 Stage <strong>{open.stage}</strong> advances on{" "}
                 <strong>{board.approver_for_stage[open.stage] ?? "—"}</strong> sign-off.
                 {role

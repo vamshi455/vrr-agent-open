@@ -23,7 +23,7 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
   const llm = health?.llm;
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-white
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-surface-border bg-surface-card
                        px-3 sm:gap-4 sm:px-4">
       {/* ------------------------------------------------------------- brand */}
       <div className="flex min-w-0 items-center gap-2.5">
@@ -32,18 +32,18 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
           <div className="truncate text-sub font-semibold tracking-tight text-brand-900">
             Meridian Petroleum
           </div>
-          <div className="mt-0.5 hidden text-micro text-slate-500 sm:block">
+          <div className="mt-0.5 hidden text-micro text-content-muted sm:block">
             VRR Reasoning &amp; Lineage
           </div>
         </div>
       </div>
 
       {/* ----------------------------------------------------------- context */}
-      <div className="ml-2 hidden items-center gap-2 border-l border-slate-200 pl-4 lg:flex">
-        <span className="text-label text-slate-500">Reviewing</span>
-        <span className="text-label font-medium text-slate-800">{patternName || "—"}</span>
-        <span className="text-slate-300">·</span>
-        <span className="text-label text-slate-600">
+      <div className="ml-2 hidden items-center gap-2 border-l border-surface-border pl-4 lg:flex">
+        <span className="text-label text-content-muted">Reviewing</span>
+        <span className="text-label font-medium text-content-primary">{patternName || "—"}</span>
+        <span className="text-surface-border">·</span>
+        <span className="text-label text-content-secondary">
           {period
             ? new Date(period + "T00:00:00").toLocaleDateString(undefined,
                 { month: "short", year: "numeric" })
@@ -63,8 +63,8 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
           : "MLflow is unreachable — answers still work, but they are NOT being recorded"}
         className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium ${
           traced
-            ? "bg-signal-soft text-signal hover:bg-green-100"
-            : "bg-offtarget-soft text-offtarget hover:bg-red-100"
+            ? "bg-signal-soft text-signal hover:bg-signal-soft"
+            : "bg-offtarget-soft text-offtarget hover:bg-offtarget-soft"
         }`}
       >
         <span className={`h-1.5 w-1.5 rounded-full ${traced ? "bg-signal" : "bg-offtarget"}`} />
@@ -75,29 +75,29 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         title={llm?.available
           ? `${llm.model} via ${llm.provider} — phrasing only; every number stays tool-computed`
           : "No model running — answers are fully computed"}
-        className="hidden shrink-0 items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1
-                   text-micro font-medium text-slate-600 sm:flex"
+        className="hidden shrink-0 items-center gap-1.5 rounded-full bg-surface-raised px-2.5 py-1
+                   text-micro font-medium text-content-secondary sm:flex"
       >
         <span className={`h-1.5 w-1.5 rounded-full ${
-          llm?.available ? "bg-signal" : "bg-slate-400"}`} />
+          llm?.available ? "bg-signal" : "bg-content-muted"}`} />
         {llm?.available ? llm.model : "no model"}
       </span>
 
       {/* ---------------------------------------------------------- identity */}
-      <div className="ml-1 shrink-0 border-l border-slate-200 pl-2 sm:pl-4">
+      <div className="ml-1 shrink-0 border-l border-surface-border pl-2 sm:pl-4">
         {me ? (
           <div className="flex items-center gap-2.5">
             <div className="hidden text-right leading-tight sm:block">
-              <div className="text-label font-medium text-slate-800">{me.username}</div>
-              <div className="text-micro text-slate-500">
+              <div className="text-label font-medium text-content-primary">{me.username}</div>
+              <div className="text-micro text-content-muted">
                 role <span className="font-medium text-brand-600">{me.role}</span>
-                <span className="text-slate-500"> · from your token</span>
+                <span className="text-content-muted"> · from your token</span>
               </div>
             </div>
             <Avatar name={me.username} />
             <button
               onClick={onSignOut}
-              className="text-micro text-slate-500 underline underline-offset-2 hover:text-slate-800"
+              className="text-micro text-content-muted underline underline-offset-2 hover:text-content-primary"
             >
               sign out
             </button>
@@ -105,7 +105,7 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         ) : (
           <button
             onClick={onSignIn}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-label font-medium text-white hover:bg-brand-700"
+            className="rounded-md bg-brand-500 px-3 py-1.5 text-label font-medium text-surface-base hover:bg-brand-600"
           >
             Sign in
           </button>

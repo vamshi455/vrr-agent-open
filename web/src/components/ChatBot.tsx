@@ -107,12 +107,12 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
       <button
         onClick={() => setOpen(true)}
         title={`Ask about ${patternName}`}
-        className="fixed bottom-5 right-5 z-30 flex h-12 items-center gap-2 rounded-full bg-brand-600 px-4 text-body font-medium text-white shadow-panel transition hover:bg-brand-700"
+        className="fixed bottom-5 right-5 z-30 flex h-12 items-center gap-2 rounded-full bg-brand-500 px-4 text-body font-medium text-surface-base shadow-panel transition hover:bg-brand-600"
       >
         <ChatIcon />
         Ask the agent
         {turns.length > 0 && (
-          <span className="rounded-full bg-white/20 px-1.5 text-micro tabular-nums">
+          <span className="rounded-full bg-surface-card/20 px-1.5 text-micro tabular-nums">
             {turns.length}
           </span>
         )}
@@ -122,8 +122,8 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
 
   // -------------------------------------------------------------------- panel
   return (
-    <div className="fixed bottom-5 right-5 z-30 flex h-[min(38rem,calc(100vh-6rem))] w-[min(26rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-panel">
-      <header className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-brand-600 px-3 py-2.5 text-white">
+    <div className="fixed bottom-5 right-5 z-30 flex h-[min(38rem,calc(100vh-6rem))] w-[min(26rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-surface-border bg-surface-card shadow-panel">
+      <header className="flex shrink-0 items-center gap-2 border-b border-surface-divider bg-brand-500 px-3 py-2.5 text-surface-base">
         <ChatIcon />
         <div className="min-w-0 flex-1 leading-tight">
           <div className="truncate text-label font-semibold">Ask about {patternName}</div>
@@ -133,69 +133,69 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
         </div>
         {turns.length > 0 && (
           <button onClick={() => setConfirmClear(true)} title="Clear this conversation"
-                  className="rounded px-1.5 py-1 text-micro text-brand-100 hover:bg-white/10">
+                  className="rounded px-1.5 py-1 text-micro text-brand-100 hover:bg-surface-card/10">
             clear
           </button>
         )}
         <button onClick={() => setOpen(false)} aria-label="Close"
-                className="rounded px-1.5 py-1 text-brand-100 hover:bg-white/10">✕</button>
+                className="rounded px-1.5 py-1 text-brand-100 hover:bg-surface-card/10">✕</button>
       </header>
 
       {confirmClear && (
-        <div className="shrink-0 border-b border-amber-200 bg-suspect-soft px-3 py-2.5">
-          <p className="text-micro leading-relaxed text-amber-900">
+        <div className="shrink-0 border-b border-suspect/40 bg-suspect-soft px-3 py-2.5">
+          <p className="text-micro leading-relaxed text-suspect">
             Hide this conversation <strong>for you</strong>. Nothing is deleted — the rows
             stay in the shared transcript for everyone else, and every question remains in
             MLflow as a trace.
           </p>
           <div className="mt-2 flex gap-2">
             <button onClick={clear}
-                    className="rounded bg-amber-700 px-2 py-1 text-micro font-medium text-white">
+                    className="rounded bg-suspect px-2 py-1 text-micro font-medium text-surface-base">
               Hide for me
             </button>
             <button onClick={() => setConfirmClear(false)}
-                    className="rounded border border-amber-300 px-2 py-1 text-micro text-amber-900">
+                    className="rounded border border-amber-300 px-2 py-1 text-micro text-suspect">
               Cancel
             </button>
           </div>
         </div>
       )}
 
-      <div className="shrink-0 border-b border-slate-100 px-3 py-2">
-        <label className="flex items-center gap-2 text-micro text-slate-600">
+      <div className="shrink-0 border-b border-surface-divider px-3 py-2">
+        <label className="flex items-center gap-2 text-micro text-content-secondary">
           <input type="checkbox" checked={agentic} disabled={!llmUp}
                  className="h-3 w-3"
                  onChange={(e) => setAgentic(e.target.checked)} />
           Model picks the tools itself
-          <span className="text-slate-500">{agentic ? "~1–2 min" : "~8 s"}</span>
+          <span className="text-content-muted">{agentic ? "~1–2 min" : "~8 s"}</span>
         </label>
         <div className="mt-1.5 flex flex-wrap gap-1">
           {quick.map(([label, prompt]) => (
             <button key={label} onClick={() => ask(prompt)} disabled={busy}
-                    className="rounded-full border border-slate-200 px-2 py-0.5 text-micro text-slate-600 hover:border-brand-300 hover:bg-brand-50 disabled:opacity-40">
+                    className="rounded-full border border-surface-border px-2 py-0.5 text-micro text-content-secondary hover:border-brand-300 hover:bg-brand-50 disabled:opacity-40">
               {label}
             </button>
           ))}
         </div>
       </div>
 
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-slate-50 p-3">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-surface-raised p-3">
         {turns.length === 0 && (
-          <p className="py-6 text-center text-micro text-slate-500">
+          <p className="py-6 text-center text-micro text-content-muted">
             Nothing asked about this pattern yet.
           </p>
         )}
         {turns.map((t, i) => <TurnBlock key={i} turn={t} />)}
       </div>
 
-      <form className="shrink-0 border-t border-slate-100 p-2"
+      <form className="shrink-0 border-t border-surface-divider p-2"
             onSubmit={(e) => { e.preventDefault(); ask(input); }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder={signedIn ? `Ask about ${patternName}…` : "Sign in to ask…"}
           disabled={busy}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-body placeholder:text-slate-500 focus:border-brand-500 disabled:bg-slate-50"
+          className="w-full rounded-lg border border-surface-border px-3 py-2 text-body placeholder:text-content-muted focus:border-brand-500 disabled:bg-surface-raised"
         />
       </form>
     </div>
@@ -209,23 +209,23 @@ function TurnBlock({ turn }: { turn: Turn }) {
 
   return (
     <div className="space-y-1">
-      <div className="ml-6 rounded-lg rounded-br-sm bg-brand-600 px-2.5 py-1.5 text-body text-white">
+      <div className="ml-6 rounded-lg rounded-br-sm bg-brand-500 px-2.5 py-1.5 text-body text-surface-base">
         {turn.question}
       </div>
 
       {turn.pending ? (
-        <p className="px-1 text-micro text-slate-500">thinking…</p>
+        <p className="px-1 text-micro text-content-muted">thinking…</p>
       ) : (
         <>
-          <div className="prose-agent mr-4 rounded-lg rounded-bl-sm border border-slate-200 bg-white px-2.5 py-2 text-body">
+          <div className="prose-agent mr-4 rounded-lg rounded-bl-sm border border-surface-border bg-surface-card px-2.5 py-2 text-body">
             <Markdown remarkPlugins={[remarkGfm]}>{turn.answer}</Markdown>
           </div>
-          <div className="flex flex-wrap items-center gap-x-2 px-1 text-micro text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-2 px-1 text-micro text-content-muted">
             <span className="inline-flex items-baseline gap-1">
               {(() => {
                 const p = provenanceLine(turn.intent, turn.meta);
                 const tone = { ok: "text-signal", warn: "text-suspect",
-                               idle: "text-slate-500", none: "" }[p.tone];
+                               idle: "text-content-muted", none: "" }[p.tone];
                 return (<>
                   {p.tone !== "none" && (
                     <StatusIcon kind={p.tone === "warn" ? "warn" : p.tone === "idle" ? "idle" : "ok"}
@@ -254,19 +254,19 @@ function TurnBlock({ turn }: { turn: Turn }) {
           {showEvidence && (
             <div className="mr-4 space-y-2 px-1">
               {caught.length > 0 && (
-                <div className="rounded-md border border-amber-200 bg-suspect-soft p-2">
-                  <p className="text-micro font-medium text-amber-900">
+                <div className="rounded-md border border-suspect/40 bg-suspect-soft p-2">
+                  <p className="text-micro font-medium text-suspect">
                     {rejected
                       ? "Gate rejected the model's phrasing — computed wording shown:"
                       : "Gate caught this and had the model rewrite it:"}
                   </p>
-                  <ul className="mt-1 list-disc pl-4 text-micro text-amber-900">
+                  <ul className="mt-1 list-disc pl-4 text-micro text-suspect">
                     {caught.map((v, i) => <li key={i}>{violationLine(v)}</li>)}
                   </ul>
                 </div>
               )}
               {turn.payload ? (
-                <pre className="max-h-52 overflow-auto rounded-md bg-white p-2 text-micro text-slate-600 ring-1 ring-slate-200">
+                <pre className="max-h-52 overflow-auto rounded-md bg-surface-card p-2 text-micro text-content-secondary ring-1 ring-slate-200">
                   {JSON.stringify(turn.payload, null, 2)}
                 </pre>
               ) : null}

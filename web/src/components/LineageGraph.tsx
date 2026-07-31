@@ -31,15 +31,15 @@ const NODE_W = 176, NODE_H = 48;
 const COL = { raw: 8, physics: 246, contrib: 484, term: 700, side: 878, vrr: 1046 };
 
 const C = {
-  raw: { fill: "#f1f5f9", stroke: "#cbd5e1", text: "#334155" },
-  physics: { fill: "#f3effc", stroke: "#a371f7", text: "#4c1d95" },
-  contrib: { fill: "#eef4f8", stroke: "#7ba7c4", text: "#1b4664" },
-  prod: { fill: "#e7f4ec", stroke: "#2f855a", text: "#1d4f38" },
-  inj: { fill: "#eef4f8", stroke: "#2d6b91", text: "#1b4664" },
+  raw: { fill: "#222d3c", stroke: "#3b4a5f", text: "#c8d6e4" },
+  physics: { fill: "#241d38", stroke: "#a98bdc", text: "#cbb8f0" },
+  contrib: { fill: "#16283a", stroke: "#3d87b8", text: "#a8d2ef" },
+  prod: { fill: "#10281c", stroke: "#4fc47f", text: "#8fe0b1" },
+  inj: { fill: "#16283a", stroke: "#5aa9dd", text: "#a8d2ef" },
 } as const;
 
 /** Kept out of `C` so `C[kind]` stays a union of node palettes, not palettes-or-string. */
-const EDGE = "#94a3b8";
+const EDGE = "#6b7c92";
 
 interface Node {
   id: string; x: number; y: number; label: string; value: string;
@@ -135,7 +135,7 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
            ["curated", "CURATED", COL.contrib], ["terms", "RESERVOIR TERMS", COL.term],
            ["sides", "SIDES", COL.side], ["out", "RESULT", COL.vrr]] as const)
           .map(([k, label, x]) => (
-            <text key={k} x={x} y={12} className="fill-slate-500"
+            <text key={k} x={x} y={12} className="fill-content-muted"
                   style={{ fontSize: 11, letterSpacing: 0.7 }}>{label}</text>
           ))}
 
@@ -156,7 +156,7 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
                     markerEnd="url(#lin-arrow)" />
               {tag && (
                 <text x={(x1 + x2) / 2} y={y1 - 6} textAnchor="middle"
-                      className="fill-slate-500 tabular-nums" style={{ fontSize: 11 }}>
+                      className="fill-content-muted tabular-nums" style={{ fontSize: 11 }}>
                   <title>Volume-weighted mean contribution factor for this period</title>
                   {tag}
                 </text>
@@ -184,35 +184,35 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
         {/* ---- the result ---- */}
         <g opacity={!lit || lit.has("prod") || lit.has("injs") ? 1 : 0.35}>
           <rect x={vrrX} y={vrrY} width={120} height={64} rx={8}
-                fill={audit.matches ? "#e7f4ec" : "#fdecec"}
-                stroke={audit.matches ? "#2f855a" : "#c53030"} strokeWidth={1.8} />
-          <text x={vrrX + 60} y={vrrY + 21} textAnchor="middle" className="fill-slate-500"
+                fill={audit.matches ? "#10281c" : "#2b1418"}
+                stroke={audit.matches ? "#4fc47f" : "#f2777a"} strokeWidth={1.8} />
+          <text x={vrrX + 60} y={vrrY + 21} textAnchor="middle" className="fill-content-muted"
                 style={{ fontSize: 11 }}>VRR</text>
           <text x={vrrX + 60} y={vrrY + 47} textAnchor="middle"
                 className="font-semibold tabular-nums"
-                fill={audit.matches ? "#1d4f38" : "#8a1c1c"} style={{ fontSize: 22 }}>
+                fill={audit.matches ? "#8fe0b1" : "#f2a3a5"} style={{ fontSize: 22 }}>
             {r.vrr.toFixed(3)}
           </text>
-          <text x={vrrX + 60} y={vrrY + 82} textAnchor="middle" className="fill-slate-500"
+          <text x={vrrX + 60} y={vrrY + 82} textAnchor="middle" className="fill-content-muted"
                 style={{ fontSize: 11 }}>
             stored {audit.stored.vrr.toFixed(3)}
           </text>
           <text x={vrrX + 60} y={vrrY + 97} textAnchor="middle"
-                fill={audit.matches ? "#2f855a" : "#c53030"} style={{ fontSize: 11 }}>
+                fill={audit.matches ? "#4fc47f" : "#f2777a"} style={{ fontSize: 11 }}>
             Δ {audit.difference.toExponential(1)}
           </text>
         </g>
 
         {/* ---- formulas: small, in the corner, lighting up with the hovered term ---- */}
         <g transform={`translate(8, 390)`}>
-          <text x={0} y={0} className="fill-slate-500" style={{ fontSize: 11, letterSpacing: 0.7 }}>
+          <text x={0} y={0} className="fill-content-muted" style={{ fontSize: 11, letterSpacing: 0.7 }}>
             FORMULAS · core.physics
           </text>
           {Object.entries(f).map(([term, formula], i) => {
             const active = hot && byId[hot]?.formula === formula;
             return (
               <text key={term} x={0} y={18 + i * 16} className="font-mono"
-                    fill={active ? "#1b4664" : "#94a3b8"}
+                    fill={active ? "#a8d2ef" : "#6b7c92"}
                     style={{ fontSize: 11, fontWeight: active ? 600 : 400 }}>
                 {formula}
               </text>
@@ -250,7 +250,7 @@ function Box({ n, dim, onHover, onLeave }: {
           {line}
         </text>
       ))}
-      <text x={n.x + 8} y={n.y + NODE_H - 9} className="fill-slate-500 tabular-nums"
+      <text x={n.x + 8} y={n.y + NODE_H - 9} className="fill-content-muted tabular-nums"
             style={{ fontSize: 11 }}>
         {n.value}
       </text>
