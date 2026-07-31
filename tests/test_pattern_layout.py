@@ -90,6 +90,60 @@ def test_the_biggest_producer_is_placed_first_so_the_figure_is_stable():
     assert [p["completion_name"] for p in prods] == ["P_big", "P_small"]
 
 
+# ---- multiple injectors -----------------------------------------------------
+
+def test_injectors_do_not_sit_on_top_of_each_other():
+    """Three injectors on a fixed tiny ring overlapped into one blob with their captions
+    mashed together. The ring has to grow with the count."""
+    wells = [comp(f"I{i}", "injector", share=0.33) for i in range(3)] + \
+            [comp(f"P{i}", "producer", share=0.25) for i in range(4)]
+    inj = [n for n in PL.build(wells)["nodes"] if n["role"] == "injector"]
+    gaps = [math.dist((a["x"], a["y"]), (b["x"], b["y"]))
+            for i, a in enumerate(inj) for b in inj[i + 1:]]
+    # Node radii top out at 20 units, so anything under 40 apart is visibly overlapping.
+    assert min(gaps) > 40
+
+
+def test_producers_clear_the_whole_injector_ring():
+    wells = [comp(f"I{i}", "injector", share=0.33) for i in range(3)] + \
+            [comp("P1", "producer", factor=1.0, share=1.0)]
+    out = PL.build(wells)
+    hub = out["hub"]["radius"]
+    prod = next(n for n in out["nodes"] if n["role"] == "producer")
+    assert math.hypot(prod["x"], prod["y"]) > hub + 40
+
+
+def test_one_sweep_line_per_producer_regardless_of_injector_count():
+    """Not one per injector-producer PAIR. Three injectors and eight producers would be
+    24 crossing lines, and — the real reason — the allocation data does not say which
+    injector feeds which producer, so 24 lines would assert 24 relationships nothing in
+    the database supports."""
+    wells = [comp(f"I{i}", "injector", share=0.33) for i in range(3)] + \
+            [comp(f"P{i}", "producer", share=0.125) for i in range(8)]
+    out = PL.build(wells)
+    assert len(out["links"]) == 8
+    assert out["hub"]["radius"] > 0
+
+
+def test_the_injector_ring_widens_for_longer_well_names():
+    """A count-only ring was right for ALIOTH-I1 and too tight for ARCTURUS-I3 at the
+    same count: the circles cleared but the captions merged. Spacing has to follow the
+    label, not just the well count."""
+    def ring(name_len):
+        wells = [comp("X" * name_len + str(i), "injector", share=0.33) for i in range(3)]
+        return PL.build(wells + [comp("P1", "producer")])["hub"]["radius"]
+
+    assert ring(12) > ring(6)
+    # Adjacent labels must actually clear: chord = 2·R·sin(60°) for three on a ring.
+    r = ring(12)
+    assert 2 * r * math.sin(math.pi / 3) > PL.CHAR_W * 13
+
+
+def test_a_single_injector_leaves_the_hub_at_the_centre():
+    out = PL.build(five_spot())
+    assert out["hub"] == {"x": 0.0, "y": 0.0, "radius": 0.0}
+
+
 # ---- the flags that change how the figure is read ---------------------------
 
 def test_a_completion_in_two_patterns_is_flagged_as_shared():

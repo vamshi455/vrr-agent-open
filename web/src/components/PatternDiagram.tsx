@@ -59,6 +59,16 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
   const nodes = data.nodes;
   const byId = Object.fromEntries(nodes.map((n) => [n.completion_id, n]));
   const producers = nodes.filter((n) => n.role === "producer");
+  const injectors = nodes.filter((n) => n.role === "injector");
+  // The sweep lines start at the injection group, not at any one injector. Modelled as a
+  // stand-in node so the same trim() serves both ends of the line.
+  const hubR: LayoutNode = {
+    ...(injectors[0] ?? nodes[0]),
+    x: data.hub?.x ?? 0, y: data.hub?.y ?? 0, shared: false,
+    // Clear the whole ring of injectors plus their markers, else the line starts inside
+    // one of them.
+    size: ((data.hub?.radius ?? 0) + (injectors.length ? radius(injectors[0]) : 0) - 8) / 12,
+  };
 
   return (
     <Card
@@ -107,16 +117,17 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
             )}
 
             {data.links?.map((l) => {
-              const a = byId[l.from], b = byId[l.to];
-              if (!a || !b) return null;
-              const lit = hover === null || hover === l.from || hover === l.to;
-              // Stop the line at each well's edge. Drawn centre-to-centre the arrowhead
-              // lands underneath the producer and the sweep loses the one thing it is
-              // there to show — which way the water is going.
-              const [x1, y1, x2, y2] = trim(a, b);
+              const b = byId[l.to];
+              if (!b) return null;
+              const injectorHovered = hover !== null && byId[hover]?.role === "injector";
+              const lit = hover === null || hover === l.to || injectorHovered;
+              // Stop the line at the hub edge and again at the producer's. Drawn
+              // centre-to-centre the arrowhead lands underneath the producer and the
+              // sweep loses the one thing it is there to show — which way water is going.
+              const [x1, y1, x2, y2] = trim(hubR, b);
               return (
                 <line
-                  key={`${l.from}-${l.to}`} x1={x1} y1={y1} x2={x2} y2={y2}
+                  key={l.to} x1={x1} y1={y1} x2={x2} y2={y2}
                   stroke={C.sweep} strokeWidth={1 + 3.4 * l.factor}
                   strokeOpacity={lit ? 0.9 : 0.15}
                   strokeLinecap="round" markerEnd="url(#sweep-tip)" className="sweep-flow"
@@ -191,11 +202,11 @@ function Well({ n, dim, onHover }: {
       {/* Caption above the wells in the top half, below the ones underneath: every sweep
           line runs outward from the centre, so a label on the centre side of its well
           always has a line through it. */}
-      <text x={n.x} y={above(n) ? n.y - o - 12 : n.y + o + 11} textAnchor="middle"
+      <text x={n.x} y={above(n) ? n.y - o - 14 : n.y + o + 11} textAnchor="middle"
             className="fill-slate-700 font-medium" style={{ fontSize: 8.5, ...HALO }}>
         {n.completion_name}
       </text>
-      <text x={n.x} y={above(n) ? n.y - o - 3.5 : n.y + o + 20} textAnchor="middle"
+      <text x={n.x} y={above(n) ? n.y - o - 3 : n.y + o + 22} textAnchor="middle"
             className="fill-slate-400" style={{ fontSize: 7.5, ...HALO }}>
         {n.role === "idle" ? "idle" : `f ${n.factor.toFixed(2)} · ${fmt.pct(n.share)}`}
       </text>
@@ -217,7 +228,7 @@ function arrow(x: number, y: number, r: number, dir: 1 | -1) {
 const HALO = { stroke: "#fff", strokeWidth: 2.6, paintOrder: "stroke" } as const;
 
 /** Producers in the upper half wear their caption above; everything else below. */
-const above = (n: LayoutNode) => n.role !== "injector" && n.y < -12;
+const above = (n: LayoutNode) => n.y < -12;
 
 /** A viewBox that just contains the wells and their captions.
  *
@@ -226,7 +237,7 @@ const above = (n: LayoutNode) => n.role !== "injector" && n.y < -12;
  *  same size, and a box drawn for the worst case leaves the common case floating in a
  *  field of white. */
 function viewBox(nodes: LayoutNode[]): string {
-  const pad = 6, caption = 24;
+  const pad = 6, caption = 27;
   const xs = nodes.flatMap((n) => [n.x - outer(n), n.x + outer(n)]);
   const ys = nodes.flatMap((n) => [
     n.y - outer(n) - (above(n) ? caption : 0),

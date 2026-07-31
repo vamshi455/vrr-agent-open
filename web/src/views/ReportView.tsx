@@ -14,7 +14,7 @@ import {
 import {
   api, type AnalysisCase, type Decompose, type PatternContext, type TrendRow,
 } from "../api";
-import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, fmt } from "../components/ui";
+import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, fmt } from "../components/ui";
 import { PatternDiagram } from "../components/PatternDiagram";
 
 interface Props {
@@ -90,7 +90,7 @@ export function ReportView({ patternId, period, trend }: Props) {
         </p>
       </header>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Metric label="VRR" value={fmt.vrr(sel.vrr)}
                 tone={inBand ? "good" : "bad"}
                 foot={prev ? `${fmt.signed(sel.vrr - prev.vrr, 3)} MoM` : undefined} />
@@ -103,7 +103,10 @@ export function ReportView({ patternId, period, trend }: Props) {
       {audit ? (
         <Banner
           tone={audit.verdict === "REAL_SIGNAL" ? "good" : "warn"}
-          title={`${audit.verdict === "REAL_SIGNAL" ? "✅" : "🛑"} Input audit: ${audit.verdict}`}
+          title={<span className="inline-flex items-center gap-1.5">
+            <StatusIcon kind={audit.verdict === "REAL_SIGNAL" ? "ok" : "blocked"} />
+            Input audit: {audit.verdict}
+          </span>}
         >
           {audit.summary}
           {audit.verdict !== "REAL_SIGNAL" && (
@@ -112,7 +115,9 @@ export function ReportView({ patternId, period, trend }: Props) {
           )}
         </Banner>
       ) : sel.any_extrapolated ? (
-        <Banner tone="warn" title="⚠️ Extrapolated PVT in this period">
+        <Banner tone="warn" title={<span className="inline-flex items-center gap-1.5">
+          <StatusIcon kind="warn" /> Extrapolated PVT in this period
+        </span>}>
           Inputs are suspect. Run <code className="font-mono">make audit</code> to record
           a verdict.
         </Banner>
@@ -166,7 +171,7 @@ export function ReportView({ patternId, period, trend }: Props) {
         ) : !dec.ok ? (
           <p className="text-body text-slate-500">{dec.reason ?? "no attribution"}</p>
         ) : (
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
             <div className="col-span-2 text-body">
               <p className="font-medium">
                 {fmt.month(prev.vrr_date)} → {fmt.month(period)}

@@ -192,7 +192,8 @@ export interface PatternLayout {
   geometry?: string; geometry_label?: string; caption?: string; is_schematic?: boolean;
   n_injectors?: number; n_producers?: number; n_idle?: number;
   nodes?: LayoutNode[];
-  links?: { from: string; to: string; factor: number; share_of_production: number }[];
+  links?: { to: string; factor: number; share_of_production: number }[];
+  hub?: { x: number; y: number; radius: number };
   shared?: string[]; low_confidence?: string[];
 }
 

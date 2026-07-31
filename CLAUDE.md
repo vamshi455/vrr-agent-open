@@ -96,6 +96,19 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   computation with no provenance. Positions come from `core/`, not React, so the figure
   is unit-tested off-DB (`tests/test_pattern_layout.py`).
 
+- ✅ **UI audited against the `ui-ux-pro-max` rule set** (2026-07-31, skill installed at
+  `~/.claude/skills/ui-ux-pro-max`). Fixed, in priority order: **no visible focus ring
+  anywhere** (two `focus:` rules across ~19 buttons and four selects — now one
+  `:focus-visible` rule in `index.css`, so the approval chain is usable without a mouse),
+  **a desktop-only layout** (a fixed 224px rail beside the view at every width shaved the
+  four metric cards to ~50px each below 900px, so VRR read as "1" — the shell now stacks
+  under `lg:` and the header truncates instead of clipping), **emoji used as icons**
+  (✅/⚠️/🛑/⚪ → `StatusIcon` SVG on `currentColor`; a screen reader was announcing "white
+  heavy check mark" mid-sentence), and `cursor-pointer`. Take the skill's UX/accessibility
+  rules; its *visual style* output is landing-page biased (it proposed
+  `clamp(3rem,10vw,12rem)` display type and "massive whitespace" for a data-dense
+  workbench) — the existing type scale and semantic palette stay.
+
 - ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
   step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set

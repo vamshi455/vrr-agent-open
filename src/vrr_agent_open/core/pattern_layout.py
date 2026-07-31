@@ -60,6 +60,32 @@ LABELS: dict[str, str] = {
 R_NEAR, R_FAR = 0.62, 0.98
 
 
+# Width of one caption character, in the same units as the coordinates (half_width=100).
+# Measured off the rendered SVG rather than guessed: at the caption's font size an
+# uppercase well name like "ARCTURUS-I3" comes out ~5.1 units per character. Two
+# successive guesses at this number were both too small, and the labels ran together.
+CHAR_W = 5.1
+
+
+def _hub_radius(n_injectors: int, max_name: int) -> float:
+    """How wide the ring of injectors at the centre has to be.
+
+    A fixed small radius put three injectors on top of each other with their captions
+    merged into one unreadable string. Two things drive the answer, and the second is the
+    one a count-only formula misses: the ring must be big enough that adjacent *labels*
+    clear each other, so a pattern whose wells have long names needs a wider ring than
+    one with short names at the same count.
+
+    Adjacent nodes on a ring of radius R sit `2·R·sin(π/n)` apart, so solve that for the
+    width the caption actually needs. Producers then move out by the same amount.
+    """
+    if n_injectors <= 1:
+        return 0.0
+    needed = CHAR_W * max_name + 6.0                      # label width + a little air
+    by_label = needed / (2.0 * math.sin(math.pi / n_injectors)) / 100.0
+    return max(0.17 + 0.085 * (n_injectors - 1), by_label)
+
+
 def _polar(angle_deg: float, radius: float) -> tuple[float, float]:
     """Degrees-clockwise-from-north → SVG x/y in a −100…100 box, y already flipped."""
     rad = math.radians(angle_deg)
@@ -102,38 +128,48 @@ def build(completions: list[dict], *, half_width: float = 100.0) -> dict:
 
     nodes: list[dict] = []
 
-    # Injectors hold the middle. One sits dead centre; several ride a small inner ring,
-    # which is what a multi-injector pattern actually looks like on a plat.
+    # Injectors hold the middle. One sits dead centre; several ride an inner ring sized
+    # to fit them, which is what a multi-injector pattern looks like on a plat.
+    hub = _hub_radius(
+        len(injectors),
+        max((len(str(c.get("completion_name") or c.get("completion_id", ""))[:14])
+             for c in injectors), default=0),
+    )
     for i, c in enumerate(injectors):
         if len(injectors) == 1:
             x, y = 0.0, 0.0
         else:
-            x, y = _polar(i * 360.0 / len(injectors), half_width * 0.17)
+            x, y = _polar(i * 360.0 / len(injectors), half_width * hub)
         nodes.append(_node(c, "injector", x, y))
 
+    # Producers clear the whole injector ring, not just the centre point.
+    near, far = R_NEAR + hub * 0.9, R_FAR + hub * 0.9
     for c, angle in zip(producers, angles):
         factor = _clamp(c.get("factor"), 1.0)
-        radius = half_width * (R_FAR - (R_FAR - R_NEAR) * factor)
+        radius = half_width * (far - (far - near) * factor)
         x, y = _polar(angle, radius)
         nodes.append(_node(c, "producer", x, y))
 
     # Idle completions are real — a well shut in for the month still belongs to the
     # pattern — but they carry no flow, so they park on the rim and draw no connector.
     for i, c in enumerate(idle):
-        x, y = _polar(i * 360.0 / max(len(idle), 1) + 22.5, half_width * 1.06)
+        x, y = _polar(i * 360.0 / max(len(idle), 1) + 22.5, half_width * (far + 0.14))
         nodes.append(_node(c, "idle", x, y))
 
-    by_id = {n["completion_id"]: n for n in nodes}
+    # ONE sweep line per producer, drawn from the centre of the injection group rather
+    # than from each injector in turn. Two reasons, and the second is the real one:
+    # three injectors against eight producers is twenty-four crossing lines and reads as
+    # noise — but more importantly, the allocation data does not say which injector feeds
+    # which producer. A line per pair would draw twenty-four relationships the database
+    # has no opinion about. The pattern's injection as a whole sweeps toward each
+    # producer, and that is exactly what one line from the hub says.
     links = [
         {
-            "from": inj["completion_id"], "to": p["completion_id"],
+            "to": p["completion_id"],
             "factor": _clamp(p.get("factor"), 1.0),
-            # Every injector is drawn as sweeping every producer because allocation is
-            # what the data records; nothing here claims a measured flow path.
             "share_of_production": p.get("share_of_production") or 0.0,
         }
-        for inj in injectors for p in producers
-        if inj["completion_id"] in by_id and p["completion_id"] in by_id
+        for p in producers
     ]
 
     return {
@@ -141,6 +177,9 @@ def build(completions: list[dict], *, half_width: float = 100.0) -> dict:
         "geometry_label": LABELS[geometry],
         "n_injectors": len(injectors), "n_producers": len(producers), "n_idle": len(idle),
         "nodes": nodes, "links": links,
+        # Where the sweep lines start: the centre of the injection group. Emitted so the
+        # renderer never has to work out the geometry for itself.
+        "hub": {"x": 0.0, "y": 0.0, "radius": round(half_width * hub, 2)},
         "shared": sorted(n["completion_name"] for n in nodes if n["shared"]),
         "low_confidence": sorted(n["completion_name"] for n in nodes if n["low_confidence"]),
         # Said in one line so the caption cannot drift from the picture it explains.

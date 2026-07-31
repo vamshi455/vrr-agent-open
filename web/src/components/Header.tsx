@@ -23,15 +23,16 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
   const llm = health?.llm;
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4">
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-200 bg-white
+                       px-3 sm:gap-4 sm:px-4">
       {/* ------------------------------------------------------------- brand */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex min-w-0 items-center gap-2.5">
         <MeridianMark />
-        <div className="leading-none">
-          <div className="text-sub font-semibold tracking-tight text-brand-900">
+        <div className="min-w-0 leading-none">
+          <div className="truncate text-sub font-semibold tracking-tight text-brand-900">
             Meridian Petroleum
           </div>
-          <div className="mt-0.5 text-micro text-slate-500">
+          <div className="mt-0.5 hidden text-micro text-slate-500 sm:block">
             VRR Reasoning &amp; Lineage
           </div>
         </div>
@@ -60,7 +61,7 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         title={traced
           ? "Every question is recorded as a span tree in MLflow"
           : "MLflow is unreachable — answers still work, but they are NOT being recorded"}
-        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium ${
+        className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-micro font-medium ${
           traced
             ? "bg-signal-soft text-signal hover:bg-green-100"
             : "bg-offtarget-soft text-offtarget hover:bg-red-100"
@@ -74,7 +75,8 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         title={llm?.available
           ? `${llm.model} via ${llm.provider} — phrasing only; every number stays tool-computed`
           : "No model running — answers are fully computed"}
-        className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-micro font-medium text-slate-600"
+        className="hidden shrink-0 items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1
+                   text-micro font-medium text-slate-600 sm:flex"
       >
         <span className={`h-1.5 w-1.5 rounded-full ${
           llm?.available ? "bg-signal" : "bg-slate-400"}`} />
@@ -82,10 +84,10 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
       </span>
 
       {/* ---------------------------------------------------------- identity */}
-      <div className="ml-1 border-l border-slate-200 pl-4">
+      <div className="ml-1 shrink-0 border-l border-slate-200 pl-2 sm:pl-4">
         {me ? (
           <div className="flex items-center gap-2.5">
-            <div className="text-right leading-tight">
+            <div className="hidden text-right leading-tight sm:block">
               <div className="text-label font-medium text-slate-800">{me.username}</div>
               <div className="text-micro text-slate-500">
                 role <span className="font-medium text-brand-600">{me.role}</span>

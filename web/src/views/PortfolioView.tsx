@@ -72,7 +72,7 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Metric label="Patterns" value={data.n_patterns} />
         <Metric label="Off target" value={data.off_target.length}
                 tone={data.off_target.length ? "bad" : "good"} />

@@ -7,6 +7,23 @@
 @layer base {
   html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
   code { font-size: 0.95em; }
+
+  /* A visible focus ring on everything focusable, in one place.
+     The app had exactly two `focus:` rules across ~19 buttons, four selects and the chat
+     composer, so tabbing through it showed nothing at all — the top-priority failure in
+     any accessibility checklist, and the one that makes an approval chain unusable
+     without a mouse. `:focus-visible` rather than `:focus` so a click does not leave a
+     ring behind; `:where()` keeps specificity at zero so any component can still
+     override it deliberately. */
+  :where(a, button, select, input, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid theme(colors.brand.500);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  /* If it does something when clicked, say so on hover. */
+  :where(button, select, summary, [role="button"]):not(:disabled) { cursor: pointer; }
+  :where(button, select):disabled { cursor: not-allowed; }
 }
 
 /* The sweep lines on the pattern schematic march from injector to producer, because a

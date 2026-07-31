@@ -149,7 +149,7 @@ export function ApprovalView({ role }: { role: string }) {
       {open && (
         <div className="fixed inset-0 z-40 flex justify-end bg-slate-900/30"
              onClick={() => setOpen(null)}>
-          <div className="h-full w-[34rem] overflow-y-auto bg-white p-5 shadow-panel"
+          <div className="h-full w-[min(34rem,100vw)] overflow-y-auto bg-white p-5 shadow-panel"
                onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between">
               <div>

@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, type ChatMeta, type HistoryTurn } from "../api";
-import { provenanceLine, violationLine } from "./ui";
+import { StatusIcon, provenanceLine, violationLine } from "./ui";
 
 interface Props {
   patternId: string;
@@ -122,7 +122,7 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
 
   // -------------------------------------------------------------------- panel
   return (
-    <div className="fixed bottom-5 right-5 z-30 flex h-[min(38rem,calc(100vh-6rem))] w-[26rem] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-panel">
+    <div className="fixed bottom-5 right-5 z-30 flex h-[min(38rem,calc(100vh-6rem))] w-[min(26rem,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-panel">
       <header className="flex shrink-0 items-center gap-2 border-b border-slate-100 bg-brand-600 px-3 py-2.5 text-white">
         <ChatIcon />
         <div className="min-w-0 flex-1 leading-tight">
@@ -195,7 +195,7 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
           onChange={(e) => setInput(e.target.value)}
           placeholder={signedIn ? `Ask about ${patternName}…` : "Sign in to ask…"}
           disabled={busy}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-body outline-none placeholder:text-slate-400 focus:border-brand-500 disabled:bg-slate-50"
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-body placeholder:text-slate-400 focus:border-brand-500 disabled:bg-slate-50"
         />
       </form>
     </div>
@@ -221,7 +221,20 @@ function TurnBlock({ turn }: { turn: Turn }) {
             <Markdown remarkPlugins={[remarkGfm]}>{turn.answer}</Markdown>
           </div>
           <div className="flex flex-wrap items-center gap-x-2 px-1 text-micro text-slate-500">
-            <span>{provenanceLine(turn.intent, turn.meta)}</span>
+            <span className="inline-flex items-baseline gap-1">
+              {(() => {
+                const p = provenanceLine(turn.intent, turn.meta);
+                const tone = { ok: "text-signal", warn: "text-suspect",
+                               idle: "text-slate-400", none: "" }[p.tone];
+                return (<>
+                  {p.tone !== "none" && (
+                    <StatusIcon kind={p.tone === "warn" ? "warn" : p.tone === "idle" ? "idle" : "ok"}
+                                className={tone} />
+                  )}
+                  <span>{p.text}</span>
+                </>);
+              })()}
+            </span>
             {turn.traceUrl ? (
               <a href={turn.traceUrl} target="_blank" rel="noreferrer"
                  className="text-brand-600 underline underline-offset-2">

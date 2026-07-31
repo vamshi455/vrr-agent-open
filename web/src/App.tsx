@@ -118,16 +118,17 @@ export default function App() {
         onSignOut={() => { api.logout(); setMe(null); }}
       />
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* ------------------------------------------------------- filter rail */}
-        <aside className="flex w-56 shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white px-3 py-4">
-          <nav className="space-y-0.5">
+        <aside className="flex shrink-0 flex-col border-b border-slate-200 bg-white px-3 py-3
+                          lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r lg:py-4">
+          <nav className="flex gap-1 overflow-x-auto lg:block lg:space-y-0.5">
             {VIEWS.map((v) => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
                 title={v.hint}
-                className={`block w-full rounded-md px-2.5 py-1.5 text-left text-body transition ${
+                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-body transition lg:block lg:w-full ${
                   view === v.id
                     ? "bg-brand-600 font-medium text-white"
                     : "text-slate-600 hover:bg-slate-100"
@@ -138,7 +139,7 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="mt-5 space-y-3 border-t border-slate-100 pt-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3 lg:mt-5 lg:grid-cols-1 lg:space-y-3 lg:pt-4">
             <Field label="Pattern">
               <select value={patternId} onChange={(e) => setPatternId(e.target.value)}
                       className={selectClass}>
@@ -161,7 +162,7 @@ export default function App() {
             </Field>
           </div>
 
-          <div className="mt-auto space-y-1.5 border-t border-slate-100 pt-4 text-micro text-slate-400">
+          <div className="mt-auto hidden space-y-1.5 border-t border-slate-100 pt-4 text-micro text-slate-400 lg:block">
             <p>
               Postgres <code className="font-mono">{health?.postgres.host ?? "—"}</code>
             </p>
@@ -177,7 +178,7 @@ export default function App() {
         </aside>
 
         {/* ------------------------------------------------------------- view */}
-        <main className="min-w-0 flex-1 overflow-y-auto px-6 py-5">
+        <main className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
           {view === "portfolio" && <PortfolioView onPick={setPatternId} />}
           {view === "report" && <ReportView {...shared} />}
           {view === "lineage" && <LineageView {...shared} />}
@@ -208,7 +209,7 @@ export default function App() {
 
 const selectClass =
   "w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-label " +
-  "text-slate-800 outline-none focus:border-brand-500";
+  "text-slate-800 focus:border-brand-500";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

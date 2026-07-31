@@ -72,6 +72,37 @@ export function Badge({ children, tone = "slate" }: {
   );
 }
 
+/**
+ * Status glyphs, as SVG rather than as emoji.
+ *
+ * These were ✅ / ⚠️ / 🛑 / ⚪. Three problems with that: a screen reader announces
+ * "white heavy check mark" in the middle of a sentence about provenance, the glyphs
+ * render at a different size and baseline in every OS font, and they cannot take the
+ * semantic colour of the thing they sit next to. Inline SVG on `currentColor` fixes all
+ * three and stays a single character wide in the type scale.
+ */
+export function StatusIcon({ kind, className = "" }: {
+  kind: "ok" | "warn" | "blocked" | "idle"; className?: string;
+}) {
+  const d = {
+    ok: "M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79"
+      + "-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z",
+    warn: "M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625"
+      + "-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0"
+      + " 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z",
+    blocked: "M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10"
+      + "l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10"
+      + "l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z",
+    idle: "M10 5.5a4.5 4.5 0 100 9 4.5 4.5 0 000-9z",
+  }[kind];
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
+         className={`inline-block h-[1.05em] w-[1.05em] shrink-0 align-[-0.15em] ${className}`}>
+      <path d={d} />
+    </svg>
+  );
+}
+
 export function Spinner({ label = "loading…" }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 py-8 text-body text-slate-500">
@@ -149,11 +180,17 @@ const INTENT_LABEL: Record<string, string> = {
  * gate n/a (no field figures claimed)`) read like a debug log. The information is the
  * trust argument, so it stays visible — but in English.
  */
-export function provenanceLine(intent: string | undefined, meta: ChatMeta = {}): string {
+export function provenanceLine(
+  intent: string | undefined, meta: ChatMeta = {},
+): { text: string; tone: "ok" | "warn" | "idle" | "none" } {
   const source = INTENT_LABEL[intent ?? ""] ?? (intent ?? "answer").replace(/_/g, " ");
   const gate = meta.gate ?? "";
   const model = meta.model ?? "LLM";
-  let phrasing: string;
+  const tools = meta.tools_called?.length ? ` · tools: ${meta.tools_called.join(", ")}` : "";
+  // The icon is returned rather than baked into the string so the caller can colour it
+  // semantically; an emoji in the text could do neither.
+  const line = (phrasing: string, tone: "ok" | "warn" | "idle" | "none") =>
+    ({ text: `${source} · ${phrasing}${tools}`, tone });
   // Two very different reasons an answer has no LLM in it, and conflating them reads as
   // a broken model when nothing is wrong:
   //   gate "skipped (no local LLM running)"  → Ollama really is down
@@ -161,16 +198,14 @@ export function provenanceLine(intent: string | undefined, meta: ChatMeta = {}):
   //     portfolio, completions and data-quality answers are assembled from tool output
   //     by design; there is no prose for a model to write.
   if (!meta.llm && gate.startsWith("skipped"))
-    phrasing = "⚪ no model running — computed answer";
-  else if (!meta.llm) phrasing = "✅ deterministic answer — no model needed";
-  else if (gate.startsWith("REJECTED"))
-    phrasing = `⚠️ ${model} phrasing rejected — computed wording shown`;
-  else if (gate.includes("abstained")) phrasing = "abstained — nothing above the retrieval floor";
-  else if (gate.includes("repair")) phrasing = `${model} phrasing · ✅ gate passed after one repair`;
-  else if (gate.startsWith("n/a")) phrasing = `${model} · no field figures to verify`;
-  else phrasing = `${model} phrasing · ✅ gate passed`;
-  const tools = meta.tools_called?.length ? ` · tools: ${meta.tools_called.join(", ")}` : "";
-  return `${source} · ${phrasing}${tools}`;
+    return line("no model running — computed answer", "idle");
+  if (!meta.llm) return line("deterministic answer — no model needed", "ok");
+  if (gate.startsWith("REJECTED"))
+    return line(`${model} phrasing rejected — computed wording shown`, "warn");
+  if (gate.includes("abstained")) return line("abstained — nothing above the retrieval floor", "none");
+  if (gate.includes("repair")) return line(`${model} phrasing · gate passed after one repair`, "ok");
+  if (gate.startsWith("n/a")) return line(`${model} · no field figures to verify`, "none");
+  return line(`${model} phrasing · gate passed`, "ok");
 }
 
 /** A gate violation as a sentence, not a dict repr. */

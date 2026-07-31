@@ -11,7 +11,9 @@
  */
 import { useEffect, useState } from "react";
 import { api, type AuditResult, type Lineage } from "../api";
-import { Badge, Card, DataTable, ErrorNote, Metric, Spinner, fmt } from "../components/ui";
+import {
+  Badge, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, fmt,
+} from "../components/ui";
 
 interface Props { patternId: string; period: string }
 
@@ -51,14 +53,18 @@ export function LineageView({ patternId, period }: Props) {
 
       {audit.ok && (
         <>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Metric label="Stored VRR" value={audit.stored.vrr.toFixed(6)}
                     foot={`run_id ${audit.stored.run_id ?? "—"}`} />
             <Metric label="Recomputed from raw" value={audit.recomputed.vrr.toFixed(6)}
                     foot={`${audit.n_raw_rows} daily rows`} />
             <Metric label="Difference" value={audit.difference.toExponential(2)}
                     tone={audit.matches ? "good" : "bad"}
-                    foot={audit.matches ? "✅ verified" : "⚠️ mismatch"} />
+                    foot={<span className="inline-flex items-center gap-1">
+                      <StatusIcon kind={audit.matches ? "ok" : "warn"}
+                                  className={audit.matches ? "text-signal" : "text-suspect"} />
+                      {audit.matches ? "verified" : "mismatch"}
+                    </span>} />
           </div>
           <p className="text-label text-slate-500">
             PVT lookup methods in this period:{" "}
@@ -68,7 +74,7 @@ export function LineageView({ patternId, period }: Props) {
               </span>
             ))}
             {audit.low_confidence_inputs && (
-              <span className="text-suspect"> ⚠️ low-confidence — no valve change may be
+              <span className="text-suspect"> <StatusIcon kind="warn" /> low-confidence — no valve change may be
                 proposed on this period</span>
             )}
           </p>
