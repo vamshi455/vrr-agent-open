@@ -35,7 +35,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   AND tool-call before you switch. Keys live in `.env` only (see `.env.example`).
 - **docker-compose** — postgres+pgvector · unitycatalog · mlflow
 
-## Current status (2026-07-24)
+## Current status (2026-07-31)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
   anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **159 tests pass**
   (`pytest -q`, no stack needed — incl. `tests/test_graph.py`, which walks every path
@@ -105,9 +105,84 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `governance/uc_register.py` — column population from information_schema for lineage
 
-## How to run
-See [docs/running.md](docs/running.md) (every command commented). Fast path:
-`pip install -e ".[dev]" && pytest -q` (logic only, no Docker). LLM chat: see [docs/agent-flow.md](docs/agent-flow.md).
+## How to run — the whole setup, in order
+
+Everything below assumes the repo root as cwd. `make` auto-selects `.venv/bin/python`,
+so never invoke `python` directly: on this machine `python`/`python3.12` resolve to conda
+base (`/opt/anaconda3`) or homebrew 3.14, neither of which has psycopg installed.
+
+### A. First time on a machine (once)
+
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"   # framework 3.12, NOT conda base
+cp .env.example .env                                            # then edit — see §B for what matters
+createuser -s vrr && createdb -O vrr vrr                         # local postgres@18 on 5432
+psql vrr -c "CREATE EXTENSION IF NOT EXISTS vector"              # pgvector for the knowledge index
+psql "postgresql://vrr:vrr@localhost:5432/vrr" -f src/vrr_agent_open/pipeline/schema.sql
+make seed                                                        # 272,880 contrib → 1,440 monthly rows
+make queue                                                       # anomalies → action_queue drafts
+make users                                                       # API accounts; PRINTS the password it sets
+make knowledge                                                   # register docs, then approve + re-run (see below)
+```
+
+`make knowledge` is two passes on purpose — registration marks documents
+`pending_review` and the human approval gate is not automated:
+
+```bash
+psql vrr -c "UPDATE vrr_agent.knowledge_registry SET status='approved'"   # the review step
+make knowledge                                                            # now it loads → chunks → redacts → embeds
+```
+
+### B. `.env` — set before starting anything
+
+Env vars are read **once at import**, so a process started before `.env` existed (or
+before you edited it) keeps the old values no matter how many times the browser is
+refreshed. Edit first, start second; after editing, restart the API.
+
+| Key | Value | Why |
+|---|---|---|
+| `VRR_PG_DSN` | `postgresql://vrr:vrr@localhost:5432/vrr` | repo default; matches §A |
+| `MLFLOW_TRACKING_URI` | `http://localhost:5001` | **5000 is macOS AirPlay** and answers 403, so tracing silently stays off |
+| `VRR_JWT_SECRET` | 48-byte urlsafe token | unset = a random key per process, so every restart invalidates every session |
+
+### C. Every session (services, in this order)
+
+```bash
+brew services list | grep postgres      # 1. Postgres — usually already running
+mlflow server --backend-store-uri sqlite:///mlflow.db \
+  --default-artifact-root ./mlartifacts --host 127.0.0.1 --port 5001 &   # 2. MLflow on 5001
+ollama serve &                          # 3. the narrator; optional — answers are computed without it
+make app                                # 4. builds web/ and serves UI + API on :8000
+```
+
+Then open **http://localhost:8000** and sign in (reads work signed out; asking the agent
+and approving need an account).
+
+Developing the UI instead: `make api` (reload, :8000) + `make web` (Vite, :5173, proxies
+`/api`).
+
+### D. Check it came up
+
+```bash
+curl -s localhost:8000/api/health | python3 -m json.tool   # want tracing.enabled true, llm.available true
+```
+
+`⚠️ NOT TRACED` in the header or `"enabled": false` means the API process predates the
+`MLFLOW_TRACKING_URI` you set — restart it, do not debug MLflow.
+
+### E. When something is already on a port
+
+`make app` failing with `address already in use` means a stale server holds :8000:
+
+```bash
+lsof -t -nP -iTCP:8000 -sTCP:LISTEN | xargs -r kill    # then `make app` again
+```
+
+### F. Evaluation
+
+```bash
+make traces && make eval      # ALWAYS in that order, ALWAYS via make — see the rule below
+```
 
 **Evaluation rule** — always `make traces` immediately before `make eval`, and only ever
 via the Makefile (`make eval` = `--eval-only`, which filters `tags.eval_case != ''`).
@@ -116,6 +191,35 @@ Running `evaluate_model.py` bare scores the last 50 traces of *any* origin (the 
 stop being comparable; it also picks `model_id` from an arbitrary member of the trace set
 when versions are mixed. Judges need Ollama up; `--no-judges` skips them (seconds, not
 minutes). Where a judge and a deterministic scorer disagree, the deterministic one is right.
+
+## Operating rules learned the hard way (2026-07-28 → 07-31)
+
+These cost real time in earlier sessions. Check them before debugging anything else.
+
+1. **Never run `python`/`python3.12` directly.** Both resolve to conda base or homebrew
+   3.14 here, neither of which has psycopg. Use `make <target>`, which selects
+   `.venv/bin/python`. A bare `pytest` has the same problem — `make test`.
+2. **Env vars are read once at import.** A server started before `.env` existed keeps the
+   old values forever; refreshing the browser cannot fix it. After editing `.env`,
+   restart the process. Symptom: the header says NOT TRACED while MLflow is demonstrably
+   up, or a token 401s that worked a minute ago.
+3. **MLflow lives on 5001, never 5000.** macOS AirPlay Receiver holds 5000 and answers
+   403; `agent/tracing.py` requires a 200 from `{uri}/health`, so tracing silently stays
+   off. `docker-compose.yml` still publishes `5000:5000` and will not bind on this Mac.
+4. **A stale server holds :8000 after a crash.** Kill it by pid from `lsof -t -nP
+   -iTCP:8000 -sTCP:LISTEN` before `make app`, rather than guessing which terminal it is in.
+5. **`web/dist` is gitignored**, so a fresh clone must run `make app` or `make web-build`
+   once. `make api` alone serves the API and a blank page.
+6. **Verify a write actually landed.** A string-replace on a line that does not exist is a
+   silent no-op — that is how the JWT secret got "written" to `.env` without being there.
+   Assert, or grep the file back.
+7. **Look at the rendered thing, not the source.** Screenshotting the UI caught three bugs
+   reading the code did not: unlabelled chart bars, a target band scrolled off the y-axis,
+   and a quick-question whose wording routed it to the wrong intent. Rendering the mermaid
+   caught a stale diagram. `mermaid-cli` and a puppeteer screenshot both work locally.
+8. **The intent router keys on words.** "high"/"low" route to `explain`; "off target" is a
+   PORTFOLIO phrase. Changing UI copy can silently change which code path answers.
+
 
 ## Key decision — "Unity Catalog on Postgres" feasibility
 Feasible as a **catalog-of-record**, NOT query enforcement. UC OSS governs registered
@@ -138,10 +242,20 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
-1. Outcome write-back: fill `adjustment_history.actual_post_vrr` after the next build and
-   EMA-update ρ (`core.recommend.update_response_factor`) into `pattern_memory`.
-2. `governance/uc_register.py` — populate columns from information_schema for lineage.
-3. Verify end-to-end on Docker (`docker compose up` → seed → queue → app); so far the
-   full path is verified against a local Postgres 18 cluster, not the compose stack.
-4. Ingest a real PDF through `pipeline/knowledge_ingest.py` so the `general` chat
-   intent is grounded in documents (embeddings model is installed).
+1. **Outcome write-back** — fill `adjustment_history.actual_post_vrr` after the next build
+   and EMA-update ρ (`core.recommend.update_response_factor`) into `pattern_memory`. This
+   is the last open link in the closed loop: the function exists and is unit-tested, the
+   job that feeds it observed outcomes does not.
+2. **The 3 LLM judges return ~0.02 with "Not enough information provided"** — find out what
+   `{{ trace }}` actually passes to `make_judge`. Until then their means are unmeasured,
+   not bad (see the 🔶 above).
+3. **A `status` intent** — "are you connected to an LLM?", "which model?", "how many
+   patterns?" currently fall through to `explain` and get answered as if they were VRR
+   questions. `/api/health` already has the facts; the answer should be deterministic,
+   because a model guessing about its own configuration is a bad failure mode.
+4. `governance/uc_register.py` — populate columns from information_schema for lineage.
+5. Verify end-to-end on Docker (`docker compose up` → seed → queue → app). Note
+   `docker-compose.yml` publishes MLflow on `5000:5000`, which will not bind on this Mac —
+   change it to `5001:5000` when doing this.
+6. Ingest a REAL (non-synthetic) PDF so the knowledge path is exercised on prose nobody
+   wrote for it; re-run `make floor` afterwards, since the threshold is corpus-dependent.
