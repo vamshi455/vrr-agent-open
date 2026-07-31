@@ -148,17 +148,41 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   pre-commit. First run found 2 routing gaps, truncated tool spans, 2 false-negative
   classes in the gate, and a figure with no tool span behind it — all fixed. 11 cases now,
   incl. `rulebook_unanswerable` (the negative RAG case: the agent must abstain).
-- 🔶 **The 3 LLM judges execute but their verdicts are NOT usable yet.** They had never
-  run at all: `make_judge(base_url=…)` was pointed at `{ollama}/v1`, but MLflow POSTs to
-  that URL verbatim instead of appending `/chat/completions`, so every judge died on a
-  silent `404` and `make eval` reported only the 6 deterministic scorers while claiming 9.
-  Fixed in `evaluation/custom_judges.py` (full endpoint + a dummy `OPENAI_API_KEY`, which
-  litellm requires even though Ollama ignores it). They now return, but score ~0.02 with
-  rationales like *"Not enough information provided"* — the trace content is not reaching
-  the judge. **Treat `provenance_cited` / `grounded_in_documents` / `decision_complete`
-  as unmeasured** (the deterministic `numbers_grounded` says 0.98 over the same traces,
-  and per the rule below the deterministic scorer wins). Open: find out what
-  `{{ trace }}` actually passes to the judge.
+- 🔶 **The 3 LLM judges now RUN, but their verdicts are still not usable** (diagnosed
+  2026-07-31; the previous note here was wrong and sent the hunt in the wrong direction).
+  - **They were never executing.** Not "scoring 0.02" — raising, before reaching a model:
+    `OPENAI_API_KEY environment variable must be set`. `.env.example` ships
+    `OPENAI_API_KEY=` (present, EMPTY) for the optional hosted path; `load_dotenv` puts
+    `""` in the environment; `os.environ.setdefault` only fills an ABSENT key so it was a
+    no-op; MLflow checks truthiness, not presence. An empty value is the worst state —
+    *configured* to the code that fills it, *missing* to the code that reads it — and it
+    was in the template, so every clone inherited it. Fixed: check the value
+    (`if not os.environ.get(...)`), keys commented out in `.env.example`, 4 regression
+    tests in `tests/test_judges_config.py`.
+  - **Now they return real verdicts** — one judge, one trace, `False` in 27s with a
+    correct rationale (that answer genuinely cited no table). `make eval` reports all 9
+    scorers instead of silently reporting 6 while claiming 9.
+  - **But the verdicts are noise on qwen2.5:7b.** Over 50 traces / 11 cases the judges
+    contradict themselves on the SAME eval case: `provenance_cited` 6/11,
+    `decision_complete` 4/11, `grounded_in_documents` 2/11. And they are semantically
+    wrong where they are confident — `grounded_in_documents` returns True on
+    `completions_listing` (not a document question at all) and `provenance_cited` returns
+    True on `general_concept` (explicitly "not your data") while returning False on
+    `lineage_derivation`, the most provenance-heavy answer in the set. Means are
+    `provenance_cited` 0.10 · `decision_complete` 0.06 · `grounded_in_documents` 0.02
+    against a deterministic `numbers_grounded` of 0.98 over the same traces — and per the
+    standing rule, the deterministic scorer wins.
+  - **Why**: `{{ trace }}` puts these in MLflow's `USE_CASE_AGENTIC_JUDGE` mode. The judge
+    is NOT handed the answer; it gets tools (`list_spans`, `get_span`, `search_trace_regex`)
+    and must tool-call its way through the trace. That is beyond a local 7B — it mostly
+    fails to retrieve evidence and defaults to False. **Next step is a bigger judge model**
+    (`VRR_JUDGE_MODEL=` a hosted or larger local model), not more prompt tuning.
+    Caveat on the self-contradiction figure: repeated traces of one case are not
+    byte-identical (the narrator varies), so it overstates slightly — but not enough to
+    change the conclusion.
+  - **Treat `provenance_cited` / `decision_complete` / `grounded_in_documents` as
+    UNMEASURED.** The 6 deterministic scorers are the real signal.
+
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `governance/uc_register.py` — column population from information_schema for lineage
 

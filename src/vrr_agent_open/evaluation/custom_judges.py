@@ -33,8 +33,15 @@ JUDGE_MODEL = os.environ.get("VRR_JUDGE_MODEL", f"openai:/{CFG.llm_model}")
 # it claimed to. Overridden by OPENAI_API_BASE if the caller sets one.
 JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE",
                                 f"{CFG.llm_base_url}/v1/chat/completions")
-# litellm requires a key to be present even when the endpoint ignores it (Ollama does).
-os.environ.setdefault("OPENAI_API_KEY", "ollama-local")
+# MLflow's openai provider refuses to start without a key, even when the endpoint is
+# Ollama and ignores it entirely. It must be a NON-EMPTY value, and `setdefault` is the
+# wrong tool: `.env` ships `OPENAI_API_KEY=` for the optional hosted path, `load_dotenv`
+# puts that empty string into the environment, and setdefault then sees the key as
+# already present and leaves "" in place. MLflow checks truthiness, not presence, so
+# every judge died with "OPENAI_API_KEY environment variable must be set" — before it
+# ever reached a model. Check the value, not the key.
+if not os.environ.get("OPENAI_API_KEY"):
+    os.environ["OPENAI_API_KEY"] = "ollama-local"
 
 PROVENANCE_CITED = """
 Examine {{ trace }}. Rate the final response on whether it attributes its figures to
