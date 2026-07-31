@@ -31,6 +31,8 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.6"]
 # Hosted narrators — BILLABLE, and never required: the stack runs fully local on Ollama.
 cloud = ["anthropic>=0.40", "openai>=1.50"]
+# Architecture PNGs (`make diagram`). Needs Graphviz on PATH: brew install graphviz.
+docs = ["diagrams>=0.23"]
 # Faster PDF parsing for bulk backfills (C library, same Document shape as pypdf).
 fastpdf = ["pymupdf>=1.24"]
 # Scanned PDFs, slides, mixed tables/figures. Large dependency tree + OCR binaries.

@@ -98,6 +98,12 @@ starts in the green box.**
 
 ## 2. System map
 
+![Architecture](docs/img/architecture.png)
+
+> Regenerate with `make diagram` ([scripts/make_architecture_diagram.py](scripts/make_architecture_diagram.py)).
+> The mermaid below is the maintained version — it lives in the text and renders in a
+> diff; the PNG is the one to paste into a slide.
+
 ```mermaid
 flowchart TB
     subgraph UI["🖥️ React workbench (web/) — make app"]
