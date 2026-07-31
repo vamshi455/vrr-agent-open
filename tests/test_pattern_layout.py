@@ -125,18 +125,25 @@ def test_one_sweep_line_per_producer_regardless_of_injector_count():
     assert out["hub"]["radius"] > 0
 
 
-def test_the_injector_ring_widens_for_longer_well_names():
-    """A count-only ring was right for ALIOTH-I1 and too tight for ARCTURUS-I3 at the
-    same count: the circles cleared but the captions merged. Spacing has to follow the
-    label, not just the well count."""
-    def ring(name_len):
-        wells = [comp("X" * name_len + str(i), "injector", share=0.33) for i in range(3)]
-        return PL.build(wells + [comp("P1", "producer")])["hub"]["radius"]
+def _ring(name_len, n=3):
+    wells = [comp("X" * name_len + str(i), "injector", share=1.0 / n) for i in range(n)]
+    return PL.build(wells + [comp("P1", "producer")])["hub"]["radius"]
 
-    assert ring(12) > ring(6)
-    # Adjacent labels must actually clear: chord = 2·R·sin(60°) for three on a ring.
-    r = ring(12)
-    assert 2 * r * math.sin(math.pi / 3) > PL.CHAR_W * 13
+
+def test_the_injector_ring_follows_whichever_caption_line_is_wider():
+    """A count-only ring was right for ALIOTH-I1 and too tight for ARCTURUS-I3 at the
+    same count. But the name is not always the wide line: under every well sits
+    "f 0.52 · 28.0%", a fixed 14 glyphs, and that is what actually collided on ALIOTH.
+    So the ring is spaced off the wider of the two, and a very long name pushes past it."""
+    assert _ring(20) > _ring(6)                    # name wins once it exceeds the value line
+    assert _ring(6) == _ring(9)                    # below that, the value line is the floor
+
+
+def test_the_ring_clears_the_value_line_even_for_short_names():
+    # ALIOTH-I1 / ALIOTH-I2 cleared by name and touched by caption. Chord for three on
+    # a ring is 2·R·sin(60°), and it has to beat the value line's own width.
+    r = _ring(9)
+    assert 2 * r * math.sin(math.pi / 3) > PL.SUB_CHARS * PL.SUB_CHAR_W
 
 
 def test_a_single_injector_leaves_the_hub_at_the_centre():

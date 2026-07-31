@@ -65,6 +65,8 @@ R_NEAR, R_FAR = 0.62, 0.98
 # uppercase well name like "ARCTURUS-I3" comes out ~5.1 units per character. Two
 # successive guesses at this number were both too small, and the labels ran together.
 CHAR_W = 5.1
+# The second caption line, "f 0.52 · 28.0%": a fixed 14 glyphs at the smaller size.
+SUB_CHARS, SUB_CHAR_W = 14, 4.9
 
 
 def _hub_radius(n_injectors: int, max_name: int) -> float:
@@ -81,7 +83,10 @@ def _hub_radius(n_injectors: int, max_name: int) -> float:
     """
     if n_injectors <= 1:
         return 0.0
-    needed = CHAR_W * max_name + 6.0                      # label width + a little air
+    # Whichever of the two caption lines is wider. The value line is a fixed shape —
+    # "f 0.52 · 28.0%" — and at 14 characters it is wider than most well names, which is
+    # exactly how ALIOTH-I1 and ALIOTH-I2 ended up touching while their names did not.
+    needed = max(CHAR_W * max_name, SUB_CHARS * SUB_CHAR_W) + 6.0
     by_label = needed / (2.0 * math.sin(math.pi / n_injectors)) / 100.0
     return max(0.17 + 0.085 * (n_injectors - 1), by_label)
 

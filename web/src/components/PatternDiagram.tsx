@@ -102,8 +102,13 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
                 <stop offset="55%" stopColor={C.injector} stopOpacity="0.07" />
                 <stop offset="100%" stopColor={C.injector} stopOpacity="0" />
               </radialGradient>
+              {/* markerUnits="userSpaceOnUse" is load-bearing: the default scales the
+                  marker by the line's stroke-width, and here stroke-width IS the
+                  contribution factor — so a strong producer grew an arrowhead five
+                  times the size of a weak one. */}
               <marker id="sweep-tip" viewBox="0 0 10 10" refX="8" refY="5"
-                      markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                      markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8"
+                      orient="auto-start-reverse">
                 <path d="M0,1 L9,5 L0,9 z" fill={C.sweep} />
               </marker>
             </defs>
@@ -232,7 +237,7 @@ function arrow(x: number, y: number, r: number, dir: 1 | -1) {
  *  that a line does not cross — the label has to defend itself instead. */
 // Knock-out in the CARD colour, not white — on a dark card a white halo turns every
 // caption into a glowing smear.
-const HALO = { stroke: "#18212d", strokeWidth: 2.6, paintOrder: "stroke" } as const;
+const HALO = { stroke: "#18212d", strokeWidth: 1.7, paintOrder: "stroke" } as const;
 
 /** Producers in the upper half wear their caption above; everything else below. */
 const above = (n: LayoutNode) => n.y < -12;
