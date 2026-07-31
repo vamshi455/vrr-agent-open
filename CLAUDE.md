@@ -15,7 +15,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - **FastAPI + React** (Vite · TypeScript · Tailwind) — the workbench, branded as the
   fictional operator **Meridian Petroleum**: header with identity top-right, 4 views
   (Portfolio · Report · Lineage · **swim-lane approval board**) and a floating chatbot,
-  over a 24-endpoint API. One type scale (`micro/label/body/sub/title/display`) and one
+  over a 25-endpoint API. One type scale (`micro/label/body/sub/title/display`) and one
   semantic palette (signal/suspect/offtarget + a hue per approval stage) — no ad-hoc
   `text-[11px]`. Streamlit was retired 2026-07-30.
 - **OAuth2 password grant + JWT bearer** (`api/auth.py`, since 2026-07-30) — writes and
@@ -71,7 +71,8 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - ✅ docker-compose + Makefile + pyproject (installable) + docs (design, running, knowledge-flow).
 - ✅ **Agent + workbench done** (see [docs/agent-flow.md](docs/agent-flow.md)):
   `core/decompose.py` (exact LMDI ΔVRR attribution) · `core/faithfulness.py` (gate) ·
-  `agent/tools.py` (15 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute) ·
+  `agent/tools.py` (16 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute,
+  `PATTERN_LAYOUT`) ·
   `agent/analyst.py` (verify → attribute → classify → propose → draft) · `agent/chat.py`
   (intent router: deterministic by default, `agentic=True` lets the model drive the tool
   loop; both gated) · `agent/graph.py` (**a real LangGraph `StateGraph`** since 2026-07-28:
@@ -83,6 +84,18 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   `adjustment_history`) with the analyst chat as a right-docked drawer beside every view,
   its transcript persisted per pattern in `vrr_agent.chat_history` (`agent/history.py`) and
   shared across users. `make api` · `make web` (dev) · `make app` (build + serve on :8000).
+- ✅ **Every pattern draws itself** (2026-07-31): `core/pattern_layout.py` (pure) places
+  wells from `pattern_contribution_factor` and names the canonical shape — five-spot,
+  seven-spot, nine-spot, line drive, else irregular — and `web/components/PatternDiagram.tsx`
+  renders it as SVG in the Report view beside a plain-English fluid balance ("for every
+  100 barrels emptied, N were put back"). It flags the two things no other view shows: a
+  completion shared across patterns, and extrapolated PVT. **It is a schematic and says
+  so on its face** — this database has contribution factors, not coordinates, so distance
+  from the injector is allocation and never feet. Drawing a convincing cross-section from
+  invented well paths would put the most-trusted figure on screen behind the only
+  computation with no provenance. Positions come from `core/`, not React, so the figure
+  is unit-tested off-DB (`tests/test_pattern_layout.py`).
+
 - ✅ **Evaluation harness** (design: [docs/evaluation.md](docs/evaluation.md); plain-English
   step-by-step: [docs/evaluation-walkthrough.md](docs/evaluation-walkthrough.md)): prompts extracted
   + versioned in the MLflow Prompt Registry (`make prompts`), 10-question expectation set

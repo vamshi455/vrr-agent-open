@@ -63,6 +63,27 @@ def test_reads_are_pass_throughs_not_computations(client, monkeypatch):
     assert got.json() == payload            # verbatim, including provenance
 
 
+def test_layout_is_a_read_and_keeps_its_schematic_disclaimer(client, monkeypatch):
+    """The figure is public (reads need no token) and must arrive still labelled.
+
+    `is_schematic` is what the view keys its "not a map" caption off. Dropping it here
+    would leave a well diagram on screen with nothing saying the positions are
+    allocation rather than location.
+    """
+    payload = {"found": True, "geometry": "five_spot", "is_schematic": True,
+               "nodes": [], "links": [],
+               "provenance": {"note": "schematic: wells placed by contribution factor"}}
+    seen = {}
+    monkeypatch.setattr(RP.T, "pattern_layout",
+                        lambda p, d: seen.update(p=p, d=d) or payload)
+
+    got = client.get(f"/api/patterns/{PATTERN}/layout", params={"date": "2026-04-01"})
+
+    assert got.status_code == 200
+    assert got.json() == payload
+    assert seen == {"p": PATTERN, "d": "2026-04-01"}
+
+
 def test_unknown_pattern_is_404_not_an_empty_page(client, monkeypatch):
     monkeypatch.setattr(RP.T, "pattern_context", lambda p: {})
     assert client.get("/api/patterns/NOPE/context").status_code == 404

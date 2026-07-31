@@ -14,6 +14,7 @@ The toolbelt, in the order an analyst usually needs it:
   VRR_GET            one period + provenance
   VRR_DECOMPOSE      ΔVRR attribution a→b (core.decompose, exact + additive)
   LIST_COMPLETIONS   the completions in a pattern, role + share of production/injection
+  PATTERN_LAYOUT     the same wells as a schematic: shape, contribution, shared completions
   VRR_LINEAGE        how THIS number was built: monthly ← completions ← raw + PVT
   VRR_AUDIT          recompute from raw + core.audit verdict (DATA_ARTIFACT/REAL_SIGNAL)
   INPUT_AUDIT        stored verdicts per pattern-period (the input-audit gate)
@@ -35,6 +36,7 @@ from ..config import load_config
 from ..core import anomaly as AN
 from ..core import audit as AU
 from ..core import decompose as DC
+from ..core import pattern_layout as PL
 from ..core import physics
 from ..core import recommend as RE
 from . import tracing
@@ -455,6 +457,54 @@ def list_completions(pattern: str, date: str | None = None) -> dict:
     }
 
 
+@tracing.trace("PATTERN_LAYOUT", span_type="TOOL")
+def pattern_layout(pattern: str, date: str | None = None) -> dict:
+    """The pattern as a picture: who injects, who produces, and how strongly they belong.
+
+    Everything positional comes from `core.pattern_layout`, which places wells by
+    contribution factor because this database holds no coordinates. What this function
+    adds on top of `list_completions` is the two things the figure needs and the table
+    does not: the human well name, and how many patterns each completion is split
+    across — a producer shared three ways is the usual reason a VRR argument starts, and
+    it is invisible in every other view.
+    """
+    base = list_completions(pattern, date)
+    if not base.get("found"):
+        return {"found": False, **{k: v for k, v in base.items() if k != "found"}}
+
+    ids = [c["completion_id"] for c in base["completions"]]
+    meta = {
+        r["completion_id"]: r
+        for r in _rows(
+            "SELECT c.id_completion AS completion_id, c.completion_name, c.uwi,"
+            " c.completion_type AS designed_type,"
+            " (SELECT count(DISTINCT f.id_pattern) FROM vrr_raw.pattern_contribution_factor f"
+            "  WHERE f.id_completion = c.id_completion) AS n_patterns"
+            " FROM vrr_raw.completion c WHERE c.id_completion = ANY(%(ids)s)",
+            {"ids": ids})
+    }
+    for c in base["completions"]:
+        c.update({k: v for k, v in meta.get(c["completion_id"], {}).items()
+                  if k != "completion_id"})
+
+    layout = PL.build(base["completions"])
+    return {
+        "found": True,
+        "pattern_id": base["pattern_id"], "pattern_name": base["pattern_name"],
+        "vrr_date": base["vrr_date"], "vrr": base["vrr"],
+        # The fluid balance the schematic is drawn around: barrels put back vs barrels
+        # taken out, both at reservoir conditions. This is the whole of VRR in two numbers.
+        "prod_res_bbl": base["prod_res_bbl"], "inj_res_bbl": base["inj_res_bbl"],
+        **layout,
+        "provenance": {
+            "tables": ["vrr_curated.completion_contrib", "vrr_raw.completion",
+                       "vrr_raw.pattern_contribution_factor"],
+            "keys": {"pattern_id": base["pattern_id"], "month": base["vrr_date"]},
+            "note": "schematic: wells placed by contribution factor, not by coordinates",
+        },
+    }
+
+
 @tracing.trace("INPUT_AUDIT", span_type="TOOL")
 def input_audit(pattern: str | None = None, verdict: str | None = None) -> dict:
     """Stored input-audit verdicts (``pipeline/input_audit.py``) — one per pattern-period.
@@ -666,6 +716,9 @@ TOOL_SPECS: list[dict[str, Any]] = [
           {**_PATTERN, **_DATE}, ["pattern", "date"]),
     _spec("LIST_COMPLETIONS", "List the completions in a pattern with role and share of VRR.",
           {**_PATTERN, **_DATE}, ["pattern"]),
+    _spec("PATTERN_LAYOUT", "The pattern's well layout: injectors, producers, contribution "
+          "factors, shared completions, and which canonical shape (five-spot, nine-spot, "
+          "line drive) it makes.", {**_PATTERN, **_DATE}, ["pattern"]),
     _spec("INPUT_AUDIT", "Stored input-audit verdicts: is a period's data trustworthy?",
           {**_PATTERN, "verdict": {"type": "string"}}, []),
     _spec("PATTERN_CONTEXT", "Target, learned band/rho, safety limits, adjustment history.",
@@ -690,6 +743,7 @@ DISPATCH = {
     "VRR_LINEAGE": lambda a: vrr_lineage(a["pattern"], a["date"]),
     "VRR_AUDIT": lambda a: vrr_audit(a["pattern"], a["date"]),
     "LIST_COMPLETIONS": lambda a: list_completions(a["pattern"], a.get("date")),
+    "PATTERN_LAYOUT": lambda a: pattern_layout(a["pattern"], a.get("date")),
     "INPUT_AUDIT": lambda a: input_audit(a.get("pattern"), a.get("verdict")),
     "PATTERN_CONTEXT": lambda a: pattern_context(a["pattern"]),
     "DETECT_ANOMALIES": lambda a: detect_anomalies(a["pattern"], a.get("as_of")),

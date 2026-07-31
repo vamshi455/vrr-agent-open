@@ -9,6 +9,17 @@
   code { font-size: 0.95em; }
 }
 
+/* The sweep lines on the pattern schematic march from injector to producer, because a
+   static line does not say which way anything is moving and that is the entire point of
+   the figure. Honoured only when the reader has not asked for less motion. */
+@layer components {
+  .sweep-flow { stroke-dasharray: 5 7; }
+  @media (prefers-reduced-motion: no-preference) {
+    .sweep-flow { animation: sweep-march 1.9s linear infinite; }
+  }
+  @keyframes sweep-march { to { stroke-dashoffset: -24; } }
+}
+
 /* Agent answers are markdown: bold figures, a sources footer, and the portfolio scan
    returns a table. Scoped styles rather than @tailwindcss/typography — the drawer is
    narrow and the plugin's default measure/margins are tuned for article width. */

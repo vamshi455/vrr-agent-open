@@ -15,6 +15,7 @@ import {
   api, type AnalysisCase, type Decompose, type PatternContext, type TrendRow,
 } from "../api";
 import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, fmt } from "../components/ui";
+import { PatternDiagram } from "../components/PatternDiagram";
 
 interface Props {
   patternId: string; period: string; trend: TrendRow[];
@@ -116,6 +117,10 @@ export function ReportView({ patternId, period, trend }: Props) {
           a verdict.
         </Banner>
       ) : null}
+
+      {/* Before any chart: what this pattern physically IS. Wells, roles, who is shared
+          with the pattern next door — the shape everything below is measured over. */}
+      <PatternDiagram patternId={patternId} period={period} />
 
       <Card
         title="VRR history"

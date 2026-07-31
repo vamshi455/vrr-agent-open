@@ -86,6 +86,18 @@ def completions(pattern_id: str, date: str | None = None) -> dict:
     return T.list_completions(pattern_id, date)
 
 
+@router.get("/patterns/{pattern_id}/layout")
+def layout(pattern_id: str, date: str | None = None) -> dict:
+    """The pattern schematic: well roles, contribution factors, and the shape they make.
+
+    Positions come from `core.pattern_layout` rather than from React, for the same reason
+    every other number does — one placement rule, unit-tested off-DB, so a figure in the
+    README and a figure in the browser cannot disagree. There are no coordinates in this
+    database, so the payload says so (`is_schematic`) and the view must label it.
+    """
+    return T.pattern_layout(pattern_id, date)
+
+
 @router.get("/patterns/{pattern_id}/analysis")
 def analysis(pattern_id: str, date: str) -> dict:
     """The five-step analyst pipeline: verify → attribute → classify → propose → draft.

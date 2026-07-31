@@ -172,6 +172,30 @@ export interface Lineage {
   recomputed_from_terms: { prod_res_bbl: number; inj_res_bbl: number; vrr: number };
 }
 
+/** The pattern schematic. Every x/y is computed by `core.pattern_layout` — this file
+ *  carries the shape, it does not decide it. `is_schematic` is always true today and the
+ *  view must say so: the database holds contribution factors, never coordinates. */
+export interface LayoutNode {
+  completion_id: string;
+  completion_name: string;
+  role: "injector" | "producer" | "idle";
+  x: number; y: number;
+  factor: number; share: number; size: number; res_bbl: number;
+  shared: boolean; n_patterns: number;
+  low_confidence: boolean; pvt_methods: string;
+}
+
+export interface PatternLayout {
+  found: boolean;
+  pattern_id?: string; pattern_name?: string; vrr_date?: string; vrr?: number;
+  prod_res_bbl?: number; inj_res_bbl?: number;
+  geometry?: string; geometry_label?: string; caption?: string; is_schematic?: boolean;
+  n_injectors?: number; n_producers?: number; n_idle?: number;
+  nodes?: LayoutNode[];
+  links?: { from: string; to: string; factor: number; share_of_production: number }[];
+  shared?: string[]; low_confidence?: string[];
+}
+
 export interface AnalysisCase {
   ok: boolean;
   reason?: string;
@@ -313,6 +337,7 @@ export const api = {
   audit: (id: string, date: string) => get<AuditResult>(`/patterns/${id}/audit`, { date }),
   lineage: (id: string, date: string) => get<Lineage>(`/patterns/${id}/lineage`, { date }),
   analysis: (id: string, date: string) => get<AnalysisCase>(`/patterns/${id}/analysis`, { date }),
+  layout: (id: string, date: string) => get<PatternLayout>(`/patterns/${id}/layout`, { date }),
   // No submitted_by / role / user in any write: the server takes the actor from the
   // token. A client-supplied identity on an audit trail is a signature anyone can forge.
   submit: (id: string, date: string) =>
