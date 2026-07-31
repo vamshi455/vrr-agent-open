@@ -66,8 +66,11 @@ register:      ## register vrr schemas/tables/functions in Unity Catalog OSS
 users:         ## create vrr_agent.app_user + seed the demo accounts (add p=<password>)
 	$(PYTHON) scripts/seed_users.py $(p)
 
-diagram:       ## render docs/img/architecture.png (needs graphviz: brew install graphviz)
+diagram:       ## render the architecture posters (graphviz PNG + D2 SVG)
 	$(PYTHON) scripts/make_architecture_diagram.py
+	@command -v d2 >/dev/null \
+	  && d2 --theme 200 --dark-theme 200 --pad 40 docs/architecture.d2 docs/img/architecture-d2.svg \
+	  || echo "  (D2 skipped — brew install d2)"
 
 api:           ## FastAPI backend (docs at http://localhost:8000/docs)
 	$(PYTHON) -m uvicorn vrr_agent_open.api.main:app --reload --port 8000

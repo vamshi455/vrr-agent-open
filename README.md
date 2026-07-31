@@ -98,11 +98,13 @@ starts in the green box.**
 
 ## 2. System map
 
-![Architecture](docs/img/architecture.png)
+![Architecture](docs/img/architecture-d2.svg)
 
-> Regenerate with `make diagram` ([scripts/make_architecture_diagram.py](scripts/make_architecture_diagram.py)).
-> The mermaid below is the maintained version — it lives in the text and renders in a
-> diff; the PNG is the one to paste into a slide.
+> `make diagram` regenerates this from [docs/architecture.d2](docs/architecture.d2) (D2)
+> and also renders an icon-based PNG from
+> [scripts/make_architecture_diagram.py](scripts/make_architecture_diagram.py) (Graphviz).
+> Both are *posters* — the mermaid below is the maintained one, because it lives in the
+> text and shows up in a diff.
 
 ```mermaid
 flowchart TB
