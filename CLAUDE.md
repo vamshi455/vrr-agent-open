@@ -96,6 +96,21 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   computation with no provenance. Positions come from `core/`, not React, so the figure
   is unit-tested off-DB (`tests/test_pattern_layout.py`).
 
+- ✅ **`make share` — public access through an ngrok tunnel, with the holes closed**
+  (2026-07-31, `api/share.py`). The workbench was built for one laptop and **reads are
+  unauthenticated by default** — pointing a tunnel at it as-is serves every pattern,
+  trend, lineage and audit to whoever has the link, and `/api/health` hands over the
+  Postgres host and MLflow URI. `VRR_SHARE=1` closes reads behind the bearer token
+  (router-level dependency, so a read endpoint added later inherits it), redacts those
+  hosts, prints a blunt startup banner, and makes a missing `VRR_JWT_SECRET` **fatal**
+  rather than a warning. `VRR_PUBLIC_READS=1` re-opens reads — a separate, deliberate
+  decision, never implied by turning sharing on. `make share` preflights ngrok's
+  authtoken, the JWT secret, and that the running server really is in share mode (env is
+  read once at import, so a running process cannot pick the flag up). Verified live:
+  anonymous read 401 / valid token 200 / forged token 401 / writes and chat 401 even with
+  reads public / health redacted. 10 tests in `tests/test_share.py`. **This is a demo
+  posture, not a deployment** — the real checklist is README §12c.
+
 - ✅ **Lineage is a graph, and the type scale is enforced** (2026-07-31).
   `web/components/LineageGraph.tsx` draws the derivation as a six-column DAG — four raw
   tables → `core.physics` → one row per completion → five reservoir terms → two sides →

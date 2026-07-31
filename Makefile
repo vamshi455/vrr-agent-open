@@ -3,7 +3,7 @@
 # Override explicitly with `make <target> PYTHON=...` to use a different interpreter.
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
-.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users diagram api web web-build app agent \
+.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users diagram api web web-build app share agent \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -83,6 +83,28 @@ web-build:     ## build the React app; `make api` then serves it at :8000
 
 app:           ## one-process workbench: build the UI, then serve it from FastAPI
 	$(MAKE) web-build && $(PYTHON) -m uvicorn vrr_agent_open.api.main:app --port 8000
+
+share:         ## expose the workbench publicly through an ngrok tunnel (demo posture)
+	@command -v ngrok >/dev/null || { echo "ngrok not installed — brew install ngrok"; exit 1; }
+	@ngrok config check >/dev/null 2>&1 || { \
+	  echo "ngrok has no authtoken. Make a free account at https://dashboard.ngrok.com,"; \
+	  echo "then: ngrok config add-authtoken <YOUR_TOKEN>"; exit 1; }
+	@grep -qE '^VRR_JWT_SECRET=.+' .env 2>/dev/null || { \
+	  echo "VRR_JWT_SECRET is not set in .env. Share mode refuses to start without it —"; \
+	  echo "an ephemeral key signs tokens that die on the next restart. Generate one:"; \
+	  echo '  $(PYTHON) -c "import secrets;print(secrets.token_urlsafe(48))"'; exit 1; }
+	@curl -sf localhost:8000/api/health >/dev/null || { \
+	  echo "Nothing is serving on :8000. Start it first, in another terminal:"; \
+	  echo "  VRR_SHARE=1 make app          # reads need a sign-in"; \
+	  echo "  VRR_SHARE=1 VRR_PUBLIC_READS=1 make app   # reads open to anyone with the link"; \
+	  exit 1; }
+	@curl -s localhost:8000/api/health | grep -q share_mode || { \
+	  echo "The server on :8000 was NOT started with VRR_SHARE=1, so reads are open and"; \
+	  echo "/api/health still reports your Postgres host. Restart it with VRR_SHARE=1"; \
+	  echo "(env is read once at import — a running process cannot pick this up)."; exit 1; }
+	@echo "Tunnelling :8000 — anyone with the printed URL can reach this machine."
+	@echo "Stop with Ctrl-C; the URL dies with it."
+	ngrok http 8000
 
 agent:         ## run one agent question from the CLI
 	$(PYTHON) -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"
