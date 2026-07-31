@@ -1,6 +1,7 @@
 # vrr_agent_open
 
-**Open-source, fully-local VRR Reasoning & Lineage agent — LangGraph + PostgreSQL/pgvector + Unity Catalog OSS + MLflow. No cloud, no cost.**
+**A waterflood surveillance assistant that is structurally incapable of making a number
+up.** Fully local, fully open-source, zero cloud cost.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![LangGraph](https://img.shields.io/badge/agent-LangGraph%20StateGraph-1C3C3C)
@@ -9,19 +10,86 @@
 ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688)
 ![React](https://img.shields.io/badge/ui-React%20%2B%20Vite%20%2B%20TS-61DAFB)
 ![MLflow](https://img.shields.io/badge/tracing%20%2B%20eval-MLflow%20OSS-0194E2)
-![Tests](https://img.shields.io/badge/tests-159%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-192%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-Apache%202.0-green)
 
-An open-source port of a Databricks VRR agent. Same trust model — **the LLM never
-computes**; every number comes from a deterministic tool with provenance, a
-faithfulness gate rejects narration the math doesn't support, recommendations are
-physics-computed and safety-clamped, humans approve, and executed outcomes feed a
-learned per-pattern response factor ρ — rebuilt on a free local stack.
+---
 
-> **Why this exists:** it shows the *architecture* (deterministic core + agentic
-> reasoning + governance + closed-loop learning) is portable off any single vendor.
-> The deterministic heart (`core/`) is copied **verbatim** from the Databricks
-> version — provider-agnostic Python with its unit tests.
+## 0. What this is, and the problem it solves
+
+### The physical problem
+
+When an oil reservoir is produced, fluid leaves the rock and the pressure drops. Drop far
+enough and the oil stops flowing to the wells — and the barrels you did not get out
+early are largely barrels you never get out at all. So operators **inject water** into
+the same reservoir to hold the pressure up. That is a *waterflood*, and a **pattern** is
+one injection well plus the producers it sweeps toward.
+
+The number that says whether it is working is the **Voidage Replacement Ratio**:
+
+> **VRR = reservoir volume put in ÷ reservoir volume taken out**
+
+Both measured *down in the reservoir*, not at the surface — a barrel of oil shrinks on
+the way up as its dissolved gas comes out, so surface barrels do not compare. Converting
+between the two is the PVT step, and it is where most of the arithmetic lives.
+
+| VRR | What it means | What it costs you |
+|---|---|---|
+| **≈ 1.0** | replacing what you take out | pressure holds — the goal |
+| **< 1.0** | under-injecting | pressure falls, oil flows more slowly, recovery is lost |
+| **> 1.0** | over-injecting | water arrives at the producers early, and you pay to lift and re-separate water you did not need to inject |
+
+### The operational problem
+
+A reservoir engineer may carry dozens of patterns. Each month, for each one, the same
+questions: *did the VRR actually move, or is this a bad allocation factor? What drove
+it — less water in, or more oil out? Should I change the injection rate, and by how
+much?* The inputs are thousands of daily allocated volumes, time-windowed contribution
+factors, and a PVT table that often has to be interpolated. It is slow, and it is easy
+to act on a number that was never real.
+
+That looks like a job for an LLM. It is — **but only for part of it.** A model that
+invents a plausible figure here is worse than no tool at all, because the output of this
+workflow is a **valve change on a real well**. A hallucinated 12% injection cut is not a
+wrong answer on a screen; it is a pressure decline nobody notices for a quarter.
+
+### What this project does about it
+
+It splits the work at exactly that line. The LLM **chooses which tool to call** and
+**phrases the result**. It never produces a figure, never picks a magnitude, never
+decides an input is trustworthy. Everything else is deterministic Python with
+provenance attached, and five mechanisms enforce the split:
+
+| | |
+|---|---|
+| **Deterministic tools** | every number comes from `core/` via a tool, with the table and keys it came from |
+| **Input audit** | a period whose raw data looks like an artifact is vetoed *before* any recommendation — it routes to a data steward instead |
+| **Faithfulness gate** | narration is checked against the tool output; unsupported drivers, wrong direction, or uncited figures are rejected and replaced |
+| **Physics-computed, clamped recommendations** | the size of a change comes from the physics and a learned per-pattern response factor ρ, then is clamped by safety limits |
+| **Human approval chain** | the agent may only write a *draft*; every stage after it is a person, and the executed outcome feeds ρ back |
+
+The result is an agent that will say **"I don't know"** — the RAG path abstains below a
+measured similarity floor rather than guessing — and whose every on-screen figure can be
+recomputed from raw rows in front of you (that is what the **Lineage & audit** view does).
+
+### What you actually get
+
+A local workbench — four views and a chat drawer over a 25-endpoint API — branded as a
+fictional operator, **Meridian Petroleum**. Portfolio triage, a per-pattern report with a
+well-pattern schematic, a derivation graph from raw tables to the final number, and a
+swim-lane approval board.
+
+> **The data is synthetic.** `pipeline/seed.py` generates it from a fixed seed. No real
+> field data is in this repo, and Meridian Petroleum is not a real company.
+
+### Where it came from
+
+The deterministic heart (`core/` — physics, anomaly rules, recommendation, the
+faithfulness gate) is lifted **verbatim**, with its unit tests, from a Databricks/Mosaic
+AI implementation of the same agent. That is the point of the exercise: the architecture
+— deterministic core, agentic reasoning, governance, closed-loop learning — is portable
+off any single vendor, and `core/` is provider-agnostic Python that proves it. Nothing in
+this repo requires Databricks, or any cloud account, to run.
 
 ---
 
@@ -29,6 +97,7 @@ learned per-pattern response factor ρ — rebuilt on a free local stack.
 
 | | |
 |---|---|
+| [0. What this is](#0-what-this-is-and-the-problem-it-solves) | **start here** — VRR, the problem, and the one boundary |
 | [1. The one idea](#1-the-one-idea-the-llm-never-computes) | where the model is allowed to act |
 | [2. System map](#2-system-map) | every component and how they connect |
 | [3. Data model](#3-data-model--three-schemas-raw--curated--agent) | three schemas, raw → curated → agent |
@@ -42,7 +111,8 @@ learned per-pattern response factor ρ — rebuilt on a free local stack.
 | [11. Observability](#11-observability--the-trace-span-tree) | the MLflow span tree |
 | [12. Governance](#12-governance--unity-catalog-as-catalog-of-record) | Unity Catalog, honestly |
 | [12b. The workbench](#12b-the-workbench--react-over-fastapi) | React over FastAPI, and why the split |
-| [12c. API security](#12c-api-security--oauth2-password-grant--jwt-bearer) | OAuth2 + JWT, and what it does not cover |
+| [12c. API security](#12c-authentication--oauth2-password-grant--jwt-bearer) | OAuth2 + JWT, and what it does not cover |
+| [12d. Sharing publicly](#12d-sharing-the-workbench-publicly--make-share) | ngrok, and the defaults that must change first |
 | [13. Run it](#13-run-it) | every make target |
 | [14. Repo layout](#14-repository-layout) | where everything lives |
 | [15. Status](#15-status--what-is-real-and-what-is-not) | what is real, what is not |
@@ -126,7 +196,7 @@ flowchart TB
         CHAT["chat.py — intent router"]
         ANALYST["analyst.py — 5-step deterministic pipeline"]
         GRAPH["graph.py — LangGraph StateGraph"]
-        TOOLS["tools.py — 15 deterministic tools"]
+        TOOLS["tools.py — 16 deterministic tools"]
         LLMC["llm.py + providers.py<br/>ollama · openai · anthropic"]
     end
 
@@ -334,11 +404,11 @@ silently drop evidence the gate is about to check. Five properties fall out:
 | Runs resume | compiled with `InMemorySaver`; `run(..., thread_id=…)` continues |
 | Runaway loops stop | `max_steps` model turns + a `recursion_limit` backstop |
 
-### The 15 deterministic tools
+### The 16 deterministic tools
 
 | Group | Tools |
 |---|---|
-| Discover | `LIST_PATTERNS` · `VRR_OVERVIEW` · `PATTERN_CONTEXT` · `LIST_COMPLETIONS` |
+| Discover | `LIST_PATTERNS` · `VRR_OVERVIEW` · `PATTERN_CONTEXT` · `LIST_COMPLETIONS` · `PATTERN_LAYOUT` |
 | Measure | `VRR_GET` · `VRR_TREND` · `VRR_DECOMPOSE` |
 | Verify | `VRR_AUDIT` (recompute from raw) · `INPUT_AUDIT` · `DATA_QUALITY` · `VRR_LINEAGE` |
 | Decide | `DETECT_ANOMALIES` · `RECOMMEND_CHANGE` · `FIND_PRECEDENT` |
@@ -932,6 +1002,62 @@ regression in any of them fails the suite rather than reaching a review.
 
 ---
 
+## 12d. Sharing the workbench publicly — `make share`
+
+This app was built to run on one laptop, and **two of its defaults are wrong the moment
+a tunnel is pointed at it**:
+
+- **Reads are unauthenticated.** `/api/patterns`, `/api/overview` and every trend,
+  lineage and audit endpoint answer `200` to anybody. Locally that is convenience; on a
+  public URL it is the whole dataset, served to whoever has the link.
+- **`/api/health` reports internal addresses** — the Postgres host and the MLflow URI.
+  Sidebar detail on a laptop, reconnaissance from a stranger's browser.
+
+`VRR_SHARE=1` switches to a public posture: reads require a bearer token, health stops
+naming hosts, the tunnel origin is accepted by CORS, and a missing `VRR_JWT_SECRET`
+becomes a **startup error** rather than a warning — an ephemeral signing key on a shared
+instance mints tokens that die at the next restart, which reads as a broken login.
+
+```bash
+ngrok config add-authtoken <YOUR_TOKEN>   # once — free account at dashboard.ngrok.com
+
+VRR_SHARE=1 make app                      # terminal A — visitors must sign in to read
+make share                                # terminal B — preflights, then opens the tunnel
+```
+
+To let people browse without an account — right for a demo over synthetic data, wrong
+for anything else:
+
+```bash
+VRR_SHARE=1 VRR_PUBLIC_READS=1 make app   # reads open; writes and chat still need a token
+```
+
+`VRR_PUBLIC_READS` is a **second, deliberate decision**. Turning sharing on must only
+ever tighten things, so it is never implied by `VRR_SHARE`.
+
+| | reads | writes | chat | `/api/health` |
+|---|---|---|---|---|
+| local (default) | open | token | token | full |
+| `VRR_SHARE=1` | **token** | token | token | redacted |
+| `+ VRR_PUBLIC_READS=1` | open | token | token | redacted |
+
+`make share` preflights rather than assuming: ngrok installed, authtoken configured,
+`VRR_JWT_SECRET` present in `.env`, something serving on `:8000`, and **that the running
+server actually has share mode on**. That last check earns its place — env is read once
+at import, so tunnelling to an already-running plain server would silently expose
+everything the flag was meant to close.
+
+> **This is a demo posture, not a deployment.** It closes the obvious holes for an
+> afternoon. TLS you terminate yourself, a real IdP, key rotation, rate limits and an
+> audit sink are all still [§12c](#12c-authentication--oauth2-password-grant--jwt-bearer).
+> The URL stays live for as long as ngrok runs — stop it when you are done.
+
+Behaviour is covered by `tests/test_share.py` (10 cases) and was verified through a live
+tunnel: anonymous read `401`, valid token `200`, forged token `401`, and with public
+reads on, writes and chat still `401` while health stays redacted.
+
+---
+
 ## 13. Run it
 
 ```bash
@@ -993,7 +1119,7 @@ vrr_agent_open/
 │   │   └── ids.py              #    stable short ids for provenance
 │   ├── agent/
 │   │   ├── graph.py            # 🧠 LangGraph StateGraph (plan/tools/gate/repair/budget)
-│   │   ├── tools.py            #    15 deterministic tools over psycopg
+│   │   ├── tools.py            #    16 deterministic tools over psycopg
 │   │   ├── analyst.py          #    the 5-step pipeline
 │   │   ├── chat.py             #    intent router + RAG + the abstain path
 │   │   ├── llm.py              #    one call shape for every backend
