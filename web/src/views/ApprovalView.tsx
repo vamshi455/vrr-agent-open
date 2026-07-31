@@ -100,20 +100,20 @@ export function ApprovalView({ role }: { role: string }) {
                 <h2 className={`text-label font-semibold uppercase tracking-wide ${style.head}`}>
                   {stage}
                 </h2>
-                <span className="text-label tabular-nums text-slate-400">{items.length}</span>
+                <span className="text-label tabular-nums text-slate-500">{items.length}</span>
                 {mine && (
                   <span className="ml-auto rounded bg-brand-50 px-1.5 py-0.5 text-micro font-medium text-brand-600">
                     yours
                   </span>
                 )}
               </div>
-              <p className="mb-2 h-8 text-micro leading-snug text-slate-400">
+              <p className="mb-2 h-8 text-micro leading-snug text-slate-500">
                 {LANE_HINT[stage]}
               </p>
 
               <div className="max-h-[calc(100vh-19rem)] flex-1 space-y-2 overflow-y-auto rounded-lg bg-slate-100/70 p-2">
                 {items.length === 0 && (
-                  <p className="px-1 py-5 text-center text-micro text-slate-400">empty</p>
+                  <p className="px-1 py-5 text-center text-micro text-slate-500">empty</p>
                 )}
                 {items.map((d) => (
                   <button
@@ -133,7 +133,7 @@ export function ApprovalView({ role }: { role: string }) {
                       {fmt.month(String(d.vrr_date))} · {d.action_type.replace(/_/g, " ")}
                     </p>
                     {d.driver && (
-                      <p className="mt-1 truncate font-mono text-micro text-slate-400">
+                      <p className="mt-1 truncate font-mono text-micro text-slate-500">
                         {d.driver}
                       </p>
                     )}
@@ -162,7 +162,7 @@ export function ApprovalView({ role }: { role: string }) {
                 </p>
               </div>
               <button onClick={() => setOpen(null)}
-                      className="rounded px-2 text-slate-400 hover:bg-slate-100">✕</button>
+                      className="rounded px-2 text-slate-500 hover:bg-slate-100">✕</button>
             </div>
 
             {open.narrative && (

@@ -162,7 +162,7 @@ export default function App() {
             </Field>
           </div>
 
-          <div className="mt-auto hidden space-y-1.5 border-t border-slate-100 pt-4 text-micro text-slate-400 lg:block">
+          <div className="mt-auto hidden space-y-1.5 border-t border-slate-100 pt-4 text-micro text-slate-500 lg:block">
             <p>
               Postgres <code className="font-mono">{health?.postgres.host ?? "—"}</code>
             </p>

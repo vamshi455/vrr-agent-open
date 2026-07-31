@@ -28,6 +28,10 @@ const C = {
   sweep: "#7ba7c4",
 } as const;
 
+/** Rendered pixels per viewBox unit. Fixed so the caption at 8.5 units always lands at
+ *  ~11px — the app's smallest step — whatever extent the pattern's own viewBox has. */
+const PX_PER_UNIT = 1.34;
+
 /** Node radius in viewBox units. `size` is already area-corrected upstream. */
 const radius = (n: LayoutNode) => 8 + 12 * n.size;
 
@@ -86,7 +90,8 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
           {/* Capped rather than fluid: an SVG that fills a 1500px column scales its own
               text with it, and the well labels end up three times the size of every
               other label in the app. The type scale wins over the picture. */}
-          <svg viewBox={viewBox(nodes)} className="mx-auto w-full max-w-[460px]" role="img"
+          <svg viewBox={viewBox(nodes)} className="mx-auto w-full"
+               style={{ maxWidth: viewBoxNums(nodes)[2] * PX_PER_UNIT }} role="img"
                aria-label={`${data.geometry_label} schematic for ${data.pattern_name}`}>
             <defs>
               {/* The swept region: strongest at the injector, fading out past the
@@ -148,7 +153,7 @@ export function PatternDiagram({ patternId, period }: { patternId: string; perio
         <FluidBalance data={data} />
       </div>
 
-      <p className="mt-4 border-t border-slate-100 pt-3 text-micro leading-relaxed text-slate-500">
+      <p className="mt-4 border-t border-slate-100 pt-3 text-label leading-relaxed text-slate-500">
         <strong className="font-medium text-slate-600">Schematic, not a map.</strong>{" "}
         Wells are placed by contribution factor — a producer drawn closer to the injector
         gives this pattern a larger share of its volumes. The database holds no well
@@ -207,7 +212,7 @@ function Well({ n, dim, onHover }: {
         {n.completion_name}
       </text>
       <text x={n.x} y={above(n) ? n.y - o - 3 : n.y + o + 22} textAnchor="middle"
-            className="fill-slate-400" style={{ fontSize: 7.5, ...HALO }}>
+            className="fill-slate-500" style={{ fontSize: 8.2, ...HALO }}>
         {n.role === "idle" ? "idle" : `f ${n.factor.toFixed(2)} · ${fmt.pct(n.share)}`}
       </text>
     </g>
@@ -237,6 +242,11 @@ const above = (n: LayoutNode) => n.y < -12;
  *  same size, and a box drawn for the worst case leaves the common case floating in a
  *  field of white. */
 function viewBox(nodes: LayoutNode[]): string {
+  const [x, y, w, h] = viewBoxNums(nodes);
+  return `${x} ${y} ${w} ${h}`;
+}
+
+function viewBoxNums(nodes: LayoutNode[]): [number, number, number, number] {
   const pad = 6, caption = 27;
   const xs = nodes.flatMap((n) => [n.x - outer(n), n.x + outer(n)]);
   const ys = nodes.flatMap((n) => [
@@ -248,7 +258,7 @@ function viewBox(nodes: LayoutNode[]): string {
   const nameHalf = Math.max(...nodes.map((n) => n.completion_name.length)) * 2.3;
   const minX = Math.min(...xs) - nameHalf - pad, maxX = Math.max(...xs) + nameHalf + pad;
   const minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
-  return `${minX} ${minY} ${maxX - minX} ${maxY - minY}`;
+  return [minX, minY, maxX - minX, maxY - minY];
 }
 
 /** Shorten a centre-to-centre segment to run edge-to-edge, leaving room for the tip. */
@@ -279,7 +289,7 @@ function Legend() {
           <span className="font-medium text-slate-600">{label}</span> {note}
         </span>
       ))}
-      <span className="text-micro text-slate-400">
+      <span className="text-micro text-slate-500">
         line weight = contribution factor · circle area = share of volume
       </span>
     </div>
@@ -308,7 +318,7 @@ function FluidBalance({ data }: { data: PatternLayout }) {
         For every <strong>100 barrels</strong> of space emptied in the rock,{" "}
         <strong style={{ color: toneHex }}>{putBack} barrels</strong> were put back.
       </p>
-      <p className="mt-1 text-micro leading-relaxed text-slate-500">
+      <p className="mt-1 text-label leading-relaxed text-slate-500">
         {vrr < 0.95
           ? "Less goes in than comes out, so pressure falls and the reservoir gives up oil more slowly."
           : vrr > 1.05
@@ -321,7 +331,7 @@ function FluidBalance({ data }: { data: PatternLayout }) {
         <Bar label="Taken out — production" value={prod} scale={scale} colour={C.producer} />
       </div>
 
-      <p className="mt-4 text-micro leading-relaxed text-slate-500">
+      <p className="mt-4 text-label leading-relaxed text-slate-500">
         Both measured <em>down in the reservoir</em>, not at surface — a barrel of oil
         shrinks on the way up, so surface barrels would not compare. That conversion is
         the PVT step, and it is why the amber rings above matter.

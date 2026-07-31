@@ -14,7 +14,7 @@ import {
 import {
   api, type AnalysisCase, type Decompose, type PatternContext, type TrendRow,
 } from "../api";
-import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, fmt } from "../components/ui";
+import { Banner, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, chartType, fmt } from "../components/ui";
 import { PatternDiagram } from "../components/PatternDiagram";
 
 interface Props {
@@ -134,16 +134,16 @@ export function ReportView({ patternId, period, trend }: Props) {
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={trend} margin={{ left: -10, right: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-            <XAxis dataKey="vrr_date" tick={{ fontSize: 11 }}
+            <XAxis dataKey="vrr_date" tick={{ fontSize: chartType.tick }}
                    tickFormatter={(d: string) => fmt.month(d)} minTickGap={28} />
             {/* The domain must always contain the band and the target, not just the
                 data. On a pattern sitting at 1.38 an auto-scaled axis drops the 0.90–1.10
                 band off-screen entirely — and "how far off target is it" is the only
                 question this chart exists to answer. */}
-            <YAxis domain={yDomain} tick={{ fontSize: 11 }} width={56}
+            <YAxis domain={yDomain} tick={{ fontSize: chartType.tick }} width={56}
                    tickFormatter={(v: number) => v.toFixed(2)} />
             <Tooltip
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={{ fontSize: chartType.tooltip }}
               labelFormatter={(d) => fmt.month(String(d))}
               formatter={(v: number, n: string) =>
                 [n === "vrr" ? v.toFixed(3) : Math.round(v).toLocaleString(), n]}
@@ -198,10 +198,10 @@ export function ReportView({ patternId, period, trend }: Props) {
             <div className="col-span-3">
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={dec.drivers} layout="vertical" margin={{ left: 30, right: 12 }}>
-                  <XAxis type="number" tick={{ fontSize: 11 }}
+                  <XAxis type="number" tick={{ fontSize: chartType.tick }}
                          tickFormatter={(v: number) => v.toFixed(3)} />
-                  <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: number) => fmt.signed(v)} contentStyle={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: chartType.tick }} />
+                  <Tooltip formatter={(v: number) => fmt.signed(v)} contentStyle={{ fontSize: chartType.tooltip }} />
                   <Bar dataKey="contribution">
                     {dec.drivers.map((d) => (
                       <Cell key={d.term} fill={d.contribution >= 0 ? "#d62728" : "#2ca02c"} />

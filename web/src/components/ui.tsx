@@ -17,7 +17,7 @@ export function Card({ title, sub, children, className = "" }: {
       {(title || sub) && (
         <header className="border-b border-slate-100 px-4 py-3">
           {title && <h2 className="text-sub font-semibold text-slate-800">{title}</h2>}
-          {sub && <p className="mt-0.5 text-micro leading-relaxed text-slate-500">{sub}</p>}
+          {sub && <p className="mt-0.5 text-label leading-relaxed text-slate-500">{sub}</p>}
         </header>
       )}
       <div className="p-4">{children}</div>
@@ -53,7 +53,7 @@ export function Banner({ tone, title, children }: {
   return (
     <div className={`rounded-lg border px-4 py-3 text-body ${styles}`}>
       <div className="font-medium">{title}</div>
-      {children && <div className="mt-1 text-micro leading-relaxed opacity-90">{children}</div>}
+      {children && <div className="mt-1 text-label leading-relaxed opacity-90">{children}</div>}
     </div>
   );
 }
@@ -212,6 +212,13 @@ export function provenanceLine(
 export function violationLine(v: { kind?: string; term?: string; detail?: string }): string {
   return v.detail ?? `${v.kind ?? "violation"} on ${v.term ?? "?"}`;
 }
+
+/**
+ * Text sizes for SVG chart furniture, in px, matching the Tailwind scale by name —
+ * `tick` is `micro` (11) and `tooltip` is `label` (12). Recharts takes numbers, not
+ * classes, so without this the scale silently forks the moment someone types 10.
+ */
+export const chartType = { tick: 11, tooltip: 12 } as const;
 
 export const fmt = {
   vrr: (v: number | null | undefined) => (v == null ? "—" : v.toFixed(3)),

@@ -91,7 +91,7 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
               <div className="text-label font-medium text-slate-800">{me.username}</div>
               <div className="text-micro text-slate-500">
                 role <span className="font-medium text-brand-600">{me.role}</span>
-                <span className="text-slate-400"> · from your token</span>
+                <span className="text-slate-500"> · from your token</span>
               </div>
             </div>
             <Avatar name={me.username} />

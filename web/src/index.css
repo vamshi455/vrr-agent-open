@@ -6,7 +6,8 @@
    is harder to scan, and this app is mostly columns of numbers. */
 @layer base {
   html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  code { font-size: 0.95em; }
+  /* No shrink: at 0.95em, code inside an 11px caption fell to 10.45px. */
+  code { font-size: 1em; }
 
   /* A visible focus ring on everything focusable, in one place.
      The app had exactly two `focus:` rules across ~19 buttons, four selects and the chat

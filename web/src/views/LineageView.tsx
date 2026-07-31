@@ -11,6 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, type AuditResult, type Lineage } from "../api";
+import { LineageGraph } from "../components/LineageGraph";
 import {
   Badge, Card, DataTable, ErrorNote, Metric, Spinner, StatusIcon, fmt,
 } from "../components/ui";
@@ -32,11 +33,6 @@ export function LineageView({ patternId, period }: Props) {
   if (err) return <ErrorNote error={err} />;
   if (!lin || !audit) return <Spinner label="recomputing from raw rows…" />;
 
-  const chain = [
-    lin.sources.raw_volumes, lin.sources.pressure, lin.sources.pvt,
-    lin.sources.lineage_layer, lin.sources.aggregate,
-  ].filter(Boolean);
-
   return (
     <div className="space-y-4">
       <header>
@@ -45,7 +41,7 @@ export function LineageView({ patternId, period }: Props) {
         </h1>
         <p className="mt-1 max-w-3xl text-label leading-relaxed text-slate-500">
           Recomputed independently in this request from{" "}
-          <code className="font-mono">{audit.provenance?.recomputed_from?.join("`, `")}</code>{" "}
+          <code className="font-mono">{audit.provenance?.recomputed_from?.join(", ")}</code>{" "}
           via <code className="font-mono">{audit.provenance?.code}</code> — not read back
           from the curated table.
         </p>
@@ -62,7 +58,7 @@ export function LineageView({ patternId, period }: Props) {
                     tone={audit.matches ? "good" : "bad"}
                     foot={<span className="inline-flex items-center gap-1">
                       <StatusIcon kind={audit.matches ? "ok" : "warn"}
-                                  className={audit.matches ? "text-signal" : "text-suspect"} />
+                                  className={audit.matches ? "text-signal" : "text-suspect-text"} />
                       {audit.matches ? "verified" : "mismatch"}
                     </span>} />
           </div>
@@ -74,37 +70,28 @@ export function LineageView({ patternId, period }: Props) {
               </span>
             ))}
             {audit.low_confidence_inputs && (
-              <span className="text-suspect"> <StatusIcon kind="warn" /> low-confidence — no valve change may be
+              <span className="text-suspect-text"> <StatusIcon kind="warn" /> low-confidence — no valve change may be
                 proposed on this period</span>
             )}
           </p>
         </>
       )}
 
-      <Card title="Derivation chain">
-        <div className="flex flex-wrap items-center gap-2 text-label">
-          {chain.map((s, i) => (
-            <span key={s} className="flex items-center gap-2">
-              <code className="rounded bg-slate-100 px-2 py-1 font-mono">{s}</code>
-              {i < chain.length - 1 && <span className="text-slate-400">→</span>}
-            </span>
-          ))}
-        </div>
+      <Card
+        title="Derivation graph"
+        sub="Four raw tables → core.physics → one row per completion → five reservoir terms → two sides → one number. Hover a term to trace what fed it; its formula lights up bottom-left."
+      >
+        <LineageGraph lin={lin} audit={audit} />
       </Card>
 
-      <Card title="Formulas" sub="core.physics — the same code the recompute above ran.">
-        <table className="w-full text-label">
-          <tbody>
-            {Object.entries(lin.formulas).map(([term, f]) => (
-              <tr key={term} className="border-b border-slate-100 last:border-0">
-                <td className="w-40 py-1.5 pr-3 font-medium text-slate-700">{term}</td>
-                <td className="py-1.5 font-mono text-slate-600">{f}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-
+      <details className="group">
+        <summary className="cursor-pointer list-none rounded-lg border border-slate-200 bg-white
+                            px-4 py-2.5 text-label text-slate-600 shadow-card hover:bg-slate-50">
+          <span className="group-open:hidden">Show</span>
+          <span className="hidden group-open:inline">Hide</span>{" "}
+          the rows behind the graph — per-completion inputs and the roll-up
+        </summary>
+        <div className="mt-3 space-y-4">
       <Card
         title="Per-completion contributions"
         sub="One row per completion for this month: root inputs, the pattern pressure used, the PVT method that produced the FVFs, and every derived term."
@@ -124,6 +111,8 @@ export function LineageView({ patternId, period }: Props) {
           is also visible as table-level lineage (<code className="font-mono">make register</code>).
         </p>
       </Card>
+        </div>
+      </details>
     </div>
   );
 }

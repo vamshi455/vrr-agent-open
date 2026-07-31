@@ -22,9 +22,14 @@ export default {
           500: "#2d6b91", 600: "#245a7b", 700: "#1b4664", 900: "#0f2a3d",
         },
         // Semantic — learned once, used everywhere: chart marks, badges, banners, lanes.
-        signal: { DEFAULT: "#2f855a", soft: "#e7f4ec" },    // on target / verified
-        suspect: { DEFAULT: "#b7791f", soft: "#fdf5e3" },   // low-confidence inputs
-        offtarget: { DEFAULT: "#c53030", soft: "#fdecec" }, // out of band / refused
+        // Each hue has a MARK shade (dots, rings, chart fills — the 3:1 graphics bar)
+        // and, where the mark is too light for prose, a darker TEXT shade. Measured, not
+        // eyeballed: the amber mark is 3.64:1 on white, which fails the 4.5:1 body-text
+        // bar, so amber prose uses `text-suspect-text` at 5.27:1 instead.
+        signal: { DEFAULT: "#2f855a", soft: "#e7f4ec" },    // on target / verified — 4.54:1
+        suspect: { DEFAULT: "#b7791f", soft: "#fdf5e3",     // low-confidence inputs
+                   text: "#946118" },                       // 5.27:1 on white, 4.86 on soft
+        offtarget: { DEFAULT: "#c53030", soft: "#fdecec" }, // out of band / refused — 5.47:1
         // One hue per approval lane, in chain order, so a card's colour says where it is
         // before you read a word of it.
         stage: {

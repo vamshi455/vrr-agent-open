@@ -11,7 +11,9 @@ import {
   Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { api, type Overview } from "../api";
-import { Badge, Card, DataTable, ErrorNote, Metric, Spinner } from "../components/ui";
+import {
+  Badge, Card, DataTable, ErrorNote, Metric, Spinner, chartType,
+} from "../components/ui";
 
 export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
   const [asset, setAsset] = useState<string>("all assets");
@@ -82,15 +84,15 @@ export function PortfolioView({ onPick }: { onPick: (id: string) => void }) {
       <Card title="Drift from target" sub="Top 20 by |VRR − target|. Click a bar to open that pattern.">
         <ResponsiveContainer width="100%" height={Math.max(260, top.length * 26)}>
           <BarChart data={top} layout="vertical" margin={{ left: 90, right: 16 }}>
-            <XAxis type="number" tick={{ fontSize: 11 }} />
+            <XAxis type="number" tick={{ fontSize: chartType.tick }} />
             {/* interval={0} or Recharts drops every other label — and an unlabelled bar
                 in a "where do I look first" chart is a bar you cannot act on. */}
-            <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11 }}
+            <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: chartType.tick }}
                    interval={0} />
             <Tooltip
               formatter={(v: number) => v.toFixed(4)}
               labelFormatter={(l) => `${l}`}
-              contentStyle={{ fontSize: 12 }}
+              contentStyle={{ fontSize: chartType.tooltip }}
             />
             <Bar dataKey="drift" onClick={(d: { id_pattern?: string }) => d.id_pattern && onPick(d.id_pattern)}>
               {top.map((p) => (

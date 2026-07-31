@@ -100,7 +100,7 @@ export function Login({ onSignedIn, onCancel, reason }: {
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-micro text-slate-400">
+          <p className="mt-2 text-micro text-slate-500">
             Seed them with <code className="font-mono">make users</code>, which prints the
             password it set.
           </p>

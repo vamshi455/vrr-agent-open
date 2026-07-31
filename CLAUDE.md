@@ -96,6 +96,22 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   computation with no provenance. Positions come from `core/`, not React, so the figure
   is unit-tested off-DB (`tests/test_pattern_layout.py`).
 
+- ✅ **Lineage is a graph, and the type scale is enforced** (2026-07-31).
+  `web/components/LineageGraph.tsx` draws the derivation as a six-column DAG — four raw
+  tables → `core.physics` → one row per completion → five reservoir terms → two sides →
+  one VRR — with the value that actually flowed on every node, hover-to-trace upstream,
+  and the `core.physics` formulas small in the bottom-left corner (the hovered term's
+  formula lights up). The old text chain and formulas table are gone; the per-completion
+  and roll-up tables fold away behind a disclosure. Type/contrast pass alongside it,
+  measured not eyeballed: `text-slate-400` was **2.56:1** and the amber `suspect`
+  **3.64:1**, both under the 4.5:1 body-text bar → slate-500 (4.76) and a new
+  `suspect.text` #946118 (5.27); `code {font-size:.95em}` dragged inline code in an 11px
+  caption to 10.45px → 1em; card/banner prose moved from `micro` (11) to `label` (12);
+  chart sizes are named (`chartType`) instead of bare 11/12; and the schematic caps its
+  width from its own viewBox so captions render at 11.4px on every pattern instead of
+  varying with the pattern's extent. Verified in a browser: no HTML text under 11px and
+  no horizontal scroll on any of the four views at 375px or 1500px.
+
 - ✅ **UI audited against the `ui-ux-pro-max` rule set** (2026-07-31, skill installed at
   `~/.claude/skills/ui-ux-pro-max`). Fixed, in priority order: **no visible focus ring
   anywhere** (two `focus:` rules across ~19 buttons and four selects — now one
