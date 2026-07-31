@@ -53,6 +53,7 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
   const r = lin.recomputed_from_terms;
   const f = lin.formulas;
   const pvt = audit.pvt_methods?.join(", ") || "—";
+  const a = lin.allocation ?? { n: 0, min: null, max: null, weighted_mean: null };
 
   // Four raw tables in, one number out. Positions are laid out by hand rather than by a
   // layout engine because the shape is fixed — this is the VRR derivation, not an
@@ -61,7 +62,12 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
     { id: "vol", x: COL.raw, y: 26, kind: "raw",
       label: "production_volumes_daily", value: `${audit.n_raw_rows} daily rows` },
     { id: "alloc", x: COL.raw, y: 118, kind: "raw",
-      label: "pattern_contribution_factor", value: "windowed by effect_date" },
+      label: "pattern_contribution_factor",
+      // FACTOR opens every formula in the corner panel, so naming the table was not
+      // enough — the graph has to say what the numbers actually were.
+      value: a.n
+        ? `${a.n} factors · ${a.min?.toFixed(2)}–${a.max?.toFixed(2)}`
+        : "windowed by effect_date" },
     { id: "pres", x: COL.raw, y: 210, kind: "raw",
       label: "pattern_pressure", value: "holds to next reading" },
     { id: "pvtsrc", x: COL.raw, y: 302, kind: "raw",
@@ -135,14 +141,27 @@ export function LineageGraph({ lin, audit }: { lin: Lineage; audit: AuditResult 
 
         {edges.map(([a, b]) => {
           const s = byId[a], d = byId[b];
+          // Just "×0.65": the gap between the allocation table and the physics box is
+          // 62px, and anything longer is clipped by the node it points at. The words go
+          // in the tooltip and the card subtitle instead.
+          const tag = a === "alloc" && lin.allocation?.weighted_mean != null
+            ? `×${lin.allocation.weighted_mean.toFixed(2)}` : null;
           const x1 = s.x + (s.w ?? NODE_W), y1 = s.y + NODE_H / 2;
           const x2 = d.x, y2 = d.y + NODE_H / 2;
           const mid = (x1 + x2) / 2;
           return (
-            <path key={`${a}-${b}`} d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
-                  fill="none" stroke={EDGE} strokeWidth={1.2}
-                  strokeOpacity={on(a) && on(b) ? 0.75 : 0.12}
-                  markerEnd="url(#lin-arrow)" />
+            <g key={`${a}-${b}`} opacity={on(a) && on(b) ? 1 : 0.16}>
+              <path d={`M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`}
+                    fill="none" stroke={EDGE} strokeWidth={1.2} strokeOpacity={0.75}
+                    markerEnd="url(#lin-arrow)" />
+              {tag && (
+                <text x={(x1 + x2) / 2} y={y1 - 6} textAnchor="middle"
+                      className="fill-slate-500 tabular-nums" style={{ fontSize: 11 }}>
+                  <title>Volume-weighted mean contribution factor for this period</title>
+                  {tag}
+                </text>
+              )}
+            </g>
           );
         })}
 

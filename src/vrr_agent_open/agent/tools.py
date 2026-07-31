@@ -186,10 +186,31 @@ def vrr_lineage(pattern: str, date: str) -> dict:
     totals = _term_totals(pid, date)
     prod = sum(totals.get(t, 0.0) for t in DC.PROD_TERMS)
     inj = sum(totals.get(t, 0.0) for t in DC.INJ_TERMS)
+    # FACTOR is the first multiplicand in every formula below, so the graph has to show
+    # it as numbers and not just name the table it came from. Summarised here rather than
+    # in the browser to keep the rule that React never derives a figure; the per-completion
+    # values are already in `completions` for the table underneath.
+    factors = [c["factor"] for c in completions if c.get("factor") is not None]
+    allocation = {
+        "n": len(factors),
+        "min": min(factors) if factors else None,
+        "max": max(factors) if factors else None,
+        # Weighted by the reservoir barrels each completion actually contributed — an
+        # unweighted mean would let a shut-in well with factor 0.95 dominate the summary.
+        "weighted_mean": (
+            sum(c["factor"] * (c["oil_res"] + c["water_res"] + c["free_gas_res"]
+                               + c["water_inj_res"] + c["gas_inj_res"])
+                for c in completions if c.get("factor") is not None)
+            / denom if (denom := sum(c["oil_res"] + c["water_res"] + c["free_gas_res"]
+                                     + c["water_inj_res"] + c["gas_inj_res"]
+                                     for c in completions)) else None
+        ),
+    }
     return {
         "found": bool(completions), "pattern_id": pid,
         "pattern_name": p["pattern_name"], "vrr_date": date,
         "monthly": monthly, "completions": completions, "term_totals": totals,
+        "allocation": allocation,
         "recomputed_from_terms": {"prod_res_bbl": prod, "inj_res_bbl": inj,
                                   "vrr": physics.vrr(inj, prod)},
         "formulas": {

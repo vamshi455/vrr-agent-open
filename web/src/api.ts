@@ -166,6 +166,10 @@ export interface AuditResult {
 
 export interface Lineage {
   sources: Record<string, string>;
+  /** FACTOR summarised across the period's completions — it is the first multiplicand
+   *  in every formula, so the graph shows it as numbers, not just as a table name. */
+  allocation?: { n: number; min: number | null; max: number | null;
+                 weighted_mean: number | null };
   formulas: Record<string, string>;
   completions: Record<string, unknown>[];
   term_totals: Record<string, number>;

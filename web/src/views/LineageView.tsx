@@ -79,7 +79,7 @@ export function LineageView({ patternId, period }: Props) {
 
       <Card
         title="Derivation graph"
-        sub="Four raw tables → core.physics → one row per completion → five reservoir terms → two sides → one number. Hover a term to trace what fed it; its formula lights up bottom-left."
+        sub="Four raw tables → core.physics → one row per completion → five reservoir terms → two sides → one number. Hover a term to trace what fed it; its formula lights up bottom-left. The ×n on the allocation edge is that period's volume-weighted mean contribution factor — FACTOR opens every formula below."
       >
         <LineageGraph lin={lin} audit={audit} />
       </Card>
