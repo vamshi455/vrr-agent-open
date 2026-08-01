@@ -1,7 +1,9 @@
 # vrr_agent_open
 
-**A waterflood surveillance assistant that is structurally incapable of making a number
-up.** Fully local, fully open-source, zero cloud cost.
+**A waterflood surveillance assistant where the model never does the arithmetic — and
+never gets the last word on it.** Every figure is computed by deterministic code with its
+source attached, and the sentence wrapped around it is checked against those figures
+before you see it. Fully local, fully open-source, zero cloud cost.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue)
 ![LangGraph](https://img.shields.io/badge/agent-LangGraph%20StateGraph-1C3C3C)
@@ -95,6 +97,18 @@ provenance attached, and five mechanisms enforce the split:
 | **Faithfulness gate** | narration is checked against the tool output; unsupported drivers, wrong direction, or uncited figures are rejected and replaced |
 | **Physics-computed, clamped recommendations** | the size of a change comes from the physics and a learned per-pattern response factor ρ, then is clamped by safety limits |
 | **Human approval chain** | the agent may only write a *draft*; every stage after it is a person, and the executed outcome feeds ρ back |
+
+> **What that claim does and does not mean.** The model can still write a wrong number —
+> nothing prevents a language model from typing one. What the design gives you is that it
+> never *computes* the number, and that its wording is verified against the tool output
+> and **discarded and replaced** when the two disagree. That is a catch, not an
+> impossibility, and the catch has edges worth knowing: `core.faithfulness.check_numbers`
+> matches decimals only, so an integer like "cut injection by 12%" or a figure written in
+> words ("about a tenth") is not number-checked — those are covered by the
+> `unsupported_driver` and `wrong_direction` rules instead, and by the fact that the
+> *recommendation itself* is computed rather than narrated. The `general` intent answers
+> from the model's own knowledge and is labelled "not your data" on screen precisely
+> because that path has no such guarantee.
 
 The result is an agent that will say **"I don't know"** — the RAG path abstains below a
 measured similarity floor rather than guessing — and whose every on-screen figure can be
