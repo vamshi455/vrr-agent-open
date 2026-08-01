@@ -35,9 +35,9 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   AND tool-call before you switch. Keys live in `.env` only (see `.env.example`).
 - **docker-compose** — postgres+pgvector · unitycatalog · mlflow
 
-## Current status (2026-07-31)
+## Current status (2026-08-01)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **159 tests pass**
+  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **199 tests pass**
   (`pytest -q`, no stack needed — incl. `tests/test_graph.py`, which walks every path
   through the LangGraph loop with the model and Postgres stubbed).
 - ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
@@ -111,6 +111,22 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   reads public / health redacted. 10 tests in `tests/test_share.py`. **This is a demo
   posture, not a deployment** — the real checklist is README §12c.
 
+- ✅ **Dark theme on a measured palette** (2026-08-01). Page `#070b11`, cards `#18212d`,
+  raised `#222d3c` — card-on-page is 1.22:1, tuned deliberately because under ~1.15 cards
+  stop reading as separate objects. Blue carries the chrome and crimson is an accent
+  confined to non-status furniture, with status red kept brighter than it: this app's job
+  is saying when a number is wrong, so "off target" must never read as decoration. The
+  light-theme semantic hues (`#2f855a`/`#b7791f`/`#c53030`) measure 1.9–2.6:1 on this
+  ground and were re-tuned to 7.6/7.9/6.2. **Three contrast failures were found by
+  querying the rendered page, not by looking at it** — white on the filled blue button at
+  3.20:1 (fixed by inverting to near-black on bright blue, 7.44:1, rather than darkening
+  the button and losing it against the page), the RM lane header at 2.14:1 (a raw
+  `text-[#5b53a6]` bypassing the token), and the analyst lane at 4.36:1. Type tightened a
+  notch (display 24→20, title 18→16, body 13→12) with **11px as a hard floor**. Also
+  `color-scheme: dark` so native selects/scrollbars follow, Recharts tooltips themed
+  explicitly (they render an inline-styled white box), and the SVG label knock-out changed
+  from white to the card colour.
+
 - ✅ **Lineage is a graph, and the type scale is enforced** (2026-07-31).
   `web/components/LineageGraph.tsx` draws the derivation as a six-column DAG — four raw
   tables → `core.physics` → one row per completion → five reservoir terms → two sides →
@@ -180,6 +196,21 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
     Caveat on the self-contradiction figure: repeated traces of one case are not
     byte-identical (the narrator varies), so it overstates slightly — but not enough to
     change the conclusion.
+  - **A bigger model did NOT fix it** (tried 2026-08-01 with a real OpenAI key,
+    `VRR_JUDGE_MODEL=openai:/gpt-4o-mini`). MLflow itself refuses:
+    `Completion iteration limit of 30 exceeded. This usually indicates the model is not
+    powerful enough to effectively analyze the trace.` So the problem is the *design*, not
+    the model size. **The fix is to stop using `{{ trace }}` for two of the three**:
+    `provenance_cited` and `decision_complete` only need to read the FINAL ANSWER, and
+    `{{ outputs }}` puts them in standard (non-agentic) mode where the text is handed
+    straight to the model — cheap, fast, and workable on the local 7B. Only
+    `grounded_in_documents` genuinely needs the retriever span. Not done: it changes what
+    the judges measure, so it is a decision, not a cleanup.
+  - Plumbing fixed alongside: `JUDGE_BASE_URL` was hardcoded to Ollama, but
+    `openai:/gpt-4o-mini` and `openai:/qwen2.5:7b` are the same provider to MLflow — a
+    hosted judge would have been POSTed to `localhost:11434`. Now applied only for a local
+    judge, and a hosted judge gets no invented key (a fake one turns "no credential" into
+    a 401).
   - **Treat `provenance_cited` / `decision_complete` / `grounded_in_documents` as
     UNMEASURED.** The 6 deterministic scorers are the real signal.
 
@@ -323,13 +354,16 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
-1. **Outcome write-back** — fill `adjustment_history.actual_post_vrr` after the next build
+1. **Make the LLM judges usable** — switch `provenance_cited` and `decision_complete`
+   from `{{ trace }}` to `{{ outputs }}` (non-agentic mode). Both only judge the final
+   answer, and agentic trace-walking defeated qwen2.5:7b AND gpt-4o-mini. Leave
+   `grounded_in_documents` on `{{ trace }}`; it needs the retriever span. Then re-run
+   `make traces && make eval` and check self-consistency again — the current numbers are
+   noise, not a quality bar.
+2. **Outcome write-back** — fill `adjustment_history.actual_post_vrr` after the next build
    and EMA-update ρ (`core.recommend.update_response_factor`) into `pattern_memory`. This
    is the last open link in the closed loop: the function exists and is unit-tested, the
    job that feeds it observed outcomes does not.
-2. **The 3 LLM judges return ~0.02 with "Not enough information provided"** — find out what
-   `{{ trace }}` actually passes to `make_judge`. Until then their means are unmeasured,
-   not bad (see the 🔶 above).
 3. **A `status` intent** — "are you connected to an LLM?", "which model?", "how many
    patterns?" currently fall through to `explain` and get answered as if they were VRR
    questions. `/api/health` already has the facts; the answer should be deterministic,
@@ -340,3 +374,17 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
    change it to `5001:5000` when doing this.
 6. Ingest a REAL (non-synthetic) PDF so the knowledge path is exercised on prose nobody
    wrote for it; re-run `make floor` afterwards, since the threshold is corpus-dependent.
+
+## Local machine state worth knowing (2026-08-01)
+
+- **`.env` currently sets `VRR_JUDGE_MODEL=openai:/gpt-4o-mini` with a real OpenAI key.**
+  This is BILLABLE and is the only non-free thing in the project. It affects `make eval`
+  ONLY — the agent narrator is still `VRR_LLM_PROVIDER=ollama` and `make app` costs
+  nothing. Unset `VRR_JUDGE_MODEL` to return to the free local judge. `.env` is gitignored
+  and untracked; no key has ever been committed.
+- The README's headline used to claim the agent was "structurally incapable of making a
+  number up". It is not, and the claim was removed: `core.faithfulness` is a CHECK that
+  runs after generation and replaces the wording, and `check_numbers` matches decimals
+  only — an integer like "cut injection by 12%" is not number-checked. Keep future copy
+  on the defensible claim: the model never does the arithmetic and never gets the last
+  word on it.
