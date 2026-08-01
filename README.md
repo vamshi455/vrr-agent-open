@@ -39,6 +39,34 @@ between the two is the PVT step, and it is where most of the arithmetic lives.
 | **< 1.0** | under-injecting | pressure falls, oil flows more slowly, recovery is lost |
 | **> 1.0** | over-injecting | water arrives at the producers early, and you pay to lift and re-separate water you did not need to inject |
 
+### Why the industry cares
+
+Waterflooding is not a niche technique — it is how a large share of the world's mature
+oil fields are produced, and it is usually the difference between recovering roughly a
+tenth of the oil in place and recovering a third of it. The rock does not give the oil
+back later: pressure lost early is recovery lost permanently. That makes VRR one of the
+few numbers on a mature asset that is genuinely irreversible if you get it wrong for
+long enough.
+
+It is also expensive in both directions, which is why it gets watched monthly rather
+than annually:
+
+| | What it actually costs |
+|---|---|
+| **Chronic under-injection** | Reservoir pressure falls below the bubble point, dissolved gas breaks out of the oil in the rock, and the oil that is left behind becomes much harder to move. Some of that loss cannot be recovered by injecting harder later. |
+| **Chronic over-injection** | Injected water short-circuits to the producers instead of sweeping oil. You then pay three times — to inject it, to lift it back out, and to separate and dispose of it — while the water cut climbs and the well's economic life shortens. In the worst case the injection pressure exceeds the fracture gradient and the water leaves the target zone entirely. |
+| **Getting it wrong on the wrong pattern** | Injection is a shared system. Turning one injector down changes the balance for every producer it touches, including ones allocated to a neighbouring pattern. |
+
+A field-wide VRR near 1.0 can also hide the problem entirely: patterns at 0.7 and 1.3
+average out to something that looks healthy while both are being managed badly. The
+useful unit is the individual pattern, which is why this app is organised around one.
+
+None of this is exotic engineering — the formula is a ratio. What makes it hard in
+practice is that the inputs are messy (allocated volumes, time-windowed contribution
+factors, an interpolated PVT table), the surveillance is repetitive, and the cost of
+acting on a number that was never real is paid months later by someone else. That
+combination is exactly where a careful assistant helps and a confident one does damage.
+
 ### The operational problem
 
 A reservoir engineer may carry dozens of patterns. Each month, for each one, the same
@@ -126,6 +154,7 @@ and **phrase results**. It may not produce a figure, pick a magnitude, or decide
 an input is trustworthy.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     subgraph MODEL["🤖 What the LLM may do"]
         direction TB
@@ -155,10 +184,14 @@ flowchart LR
     GATE -->|"rejected"| FALLBACK["computed attribution shown instead"]
     NEVER -.->|"structurally impossible"| DET
 
-    style MODEL fill:#e8f0fe,stroke:#4285f4
-    style NEVER fill:#fce8e6,stroke:#ea4335
-    style DET fill:#e6f4ea,stroke:#34a853
-    style GATE fill:#fef7e0,stroke:#fbbc04
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    class MODEL data;
+    class NEVER bad;
+    class DET ok;
+    class GATE warn;
 ```
 
 A useful way to read the rest of this document: **every arrow that carries a number
@@ -177,6 +210,7 @@ starts in the green box.**
 > text and shows up in a diff.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     subgraph UI["🖥️ React workbench (web/) — make app"]
         T1["🗺️ Portfolio — every pattern vs target"]
@@ -238,11 +272,14 @@ flowchart TB
     AGENT -.->|"every span"| ML
     PG -.->|"names + RBAC"| UC
 
-    style CORE fill:#e6f4ea,stroke:#34a853
-    style PG fill:#e8eaed,stroke:#5f6368
-    style AGENT fill:#e8f0fe,stroke:#4285f4
-    style OPS fill:#f3e8fd,stroke:#a142f4
-    style APIL fill:#e0f2f1,stroke:#009688
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef mute fill:#eef1f4,stroke:#64748b,stroke-width:1px,color:#1f2937;
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef model fill:#ece3fa,stroke:#7c3aed,stroke-width:1px,color:#3b1d70;
+    class CORE,APIL ok;
+    class PG mute;
+    class AGENT data;
+    class OPS model;
 ```
 
 ### Stack, and why each piece
@@ -264,6 +301,7 @@ flowchart TB
 ## 3. Data model — three schemas, raw → curated → agent
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     subgraph RAW["vrr_raw — as the field reports it"]
         PV["production_volumes_daily<br/>keyed by completion only"]
@@ -307,9 +345,12 @@ flowchart LR
     AH -.->|"EMA update of rho"| MEM
     KR -->|"approved only"| RK
 
-    style RAW fill:#f1f3f4,stroke:#5f6368
-    style CURATED fill:#e6f4ea,stroke:#34a853
-    style AGENTS fill:#e8f0fe,stroke:#4285f4
+    classDef mute fill:#eef1f4,stroke:#64748b,stroke-width:1px,color:#1f2937;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    class RAW mute;
+    class CURATED ok;
+    class AGENTS data;
 ```
 
 Aligned to the production VRR data model: volumes keyed by **completion only**,
@@ -323,6 +364,7 @@ deviations: [docs/vrr_data_model.md](docs/vrr_data_model.md).
 ## 4. The physics — how a VRR number is built
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     P["pattern pressure at the period"] --> LADDER
     PVTPTS["PVT points for the completion"] --> LADDER
@@ -342,9 +384,10 @@ flowchart TB
     AGG --> VRR["VRR = sum of injection reservoir bbl<br/>divided by<br/>sum of production reservoir bbl"]
     VRR --> BAND{{"vs target 1.00, band 0.90 to 1.10"}}
 
-    style LADDER fill:#e6f4ea,stroke:#34a853
-    style CONTRIB fill:#e6f4ea,stroke:#34a853
-    style SUSPECT fill:#fce8e6,stroke:#ea4335
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    class LADDER,CONTRIB ok;
+    class SUSPECT bad;
 ```
 
 **Why the PVT method is carried all the way through:** a VRR built on an *extrapolated*
@@ -361,7 +404,8 @@ not in a prompt.
 regenerates this diagram from the code.
 
 ```mermaid
-flowchart TD
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
+flowchart TB
     START(["START"]) --> PLAN
     PLAN["plan — 🤖 the ONLY node that may speak<br/>picks from 15 tool specs, or answers"]
     PLAN -->|"tool_calls present"| TOOLS
@@ -376,10 +420,12 @@ flowchart TD
     REPAIR --> GATE
     BUDGET["budget — step budget exhausted"] --> FIN
 
-    style PLAN fill:#e8f0fe,stroke:#4285f4
-    style REPAIR fill:#e8f0fe,stroke:#4285f4
-    style TOOLS fill:#e6f4ea,stroke:#34a853
-    style GATE fill:#fef7e0,stroke:#fbbc04
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    class PLAN,REPAIR data;
+    class TOOLS ok;
+    class GATE warn;
 ```
 
 ### The state schema is the contract
@@ -420,6 +466,7 @@ crash the loop; it must be something the model can see and route around.
 ### Two modes, gated identically
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     Q["analyst question"] --> ROUTER["chat.py — intent router"]
     ROUTER --> I{{"intent"}}
@@ -433,9 +480,12 @@ flowchart LR
     ROUTER -.->|"toggle in the drawer"| AGENTIC
     GATE2 --> ANS["answer + provenance caption"]
 
-    style DEFAULT fill:#e6f4ea,stroke:#34a853
-    style AGENTIC fill:#e8f0fe,stroke:#4285f4
-    style GATE2 fill:#fef7e0,stroke:#fbbc04
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    class DEFAULT ok;
+    class AGENTIC data;
+    class GATE2 warn;
 ```
 
 On a local 7B the agentic loop gets caught fabricating figures more often (it likes to
@@ -450,6 +500,7 @@ displayed — **the designed outcome, not a failure.**
 not verified, and you must not recommend on inputs you do not trust.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     S1["1️⃣ VERIFY — VRR_AUDIT via core.physics<br/>recompute the month from raw daily rows<br/>diff against stored · report the PVT method"]
     S1 --> S2["2️⃣ ATTRIBUTE — VRR_DECOMPOSE via core.decompose<br/>exact log-mean (LMDI) split<br/>contributions sum to ΔVRR, to machine precision"]
@@ -462,14 +513,16 @@ flowchart TB
     S4 --> S5["5️⃣ DRAFT — assemble the case file<br/>into action_queue at stage 'draft'"]
     VETO --> S5
 
-    style VETO fill:#fce8e6,stroke:#ea4335
-    style S1 fill:#e6f4ea,stroke:#34a853
-    style S2 fill:#e6f4ea,stroke:#34a853
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    class VETO bad;
+    class S1,S2 ok;
 ```
 
 ### How a recommendation gets its magnitude
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     A["target VRR minus current VRR"] --> B["1. physics<br/>injection reservoir bbl needed"]
     B --> C["2. precedent calibration<br/>divide by rho, the learned per-pattern gain"]
@@ -479,8 +532,10 @@ flowchart LR
     F --> G{{"was anything clamped?"}}
     G -->|"yes"| H["note: clamped by safety limits —<br/>expected VRR will not fully reach target"]
 
-    style E fill:#fce8e6,stroke:#ea4335
-    style C fill:#e6f4ea,stroke:#34a853
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    class E bad;
+    class C ok;
 ```
 
 The model never picks the number **and never sees a path where it could** — step 4 is a
@@ -494,6 +549,7 @@ The model never picks the number **and never sees a path where it could** — st
 decomposition that produced it.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     NARR["LLM narration"] --> C1
     DECOMP["core.decompose result<br/>term · label · contribution · share"] --> C1
@@ -516,11 +572,12 @@ flowchart TB
     RECHECK -->|"yes"| PASS
     RECHECK -->|"no"| REPLACE["🛡️ REPLACE with the computed attribution<br/>terse and right beats fluent and wrong"]
 
-    style PASS fill:#e6f4ea,stroke:#34a853
-    style REPLACE fill:#fef7e0,stroke:#fbbc04
-    style V1 fill:#fce8e6,stroke:#ea4335
-    style V2 fill:#fce8e6,stroke:#ea4335
-    style V3 fill:#fce8e6,stroke:#ea4335
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    class PASS ok;
+    class REPLACE warn;
+    class V1,V2,V3 bad;
 ```
 
 Two details that took real work:
@@ -549,6 +606,7 @@ The model cited **3.36** — a number no tool returned. Caught, retried, replace
 ## 8. RAG — ingest, chunking, retrieval, and knowing when to abstain
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     U["👤 drop a file in ./knowledge_uploads/<br/>.pdf .txt .md .html .docx .csv"] --> REG
     REG["1️⃣ register_new — sha1 into knowledge_registry"] --> REV
@@ -568,10 +626,12 @@ flowchart TB
     FLOOR -->|"nothing clears it"| IDK["🛑 I don't know —<br/>the model is NEVER CALLED"]
     CTX --> ANS["grounded answer + citations"]
 
-    style REV fill:#fef7e0,stroke:#fbbc04
-    style PII fill:#fce8e6,stroke:#ea4335
-    style IDK fill:#fce8e6,stroke:#ea4335
-    style SPLIT fill:#e6f4ea,stroke:#34a853
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    class REV warn;
+    class PII,IDK bad;
+    class SPLIT ok;
 ```
 
 ### Chunking is judged by retrieval, never by eye
@@ -605,6 +665,7 @@ Diagnosing a failing probe:
 ### The floor is measured, not guessed
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     subgraph MEASURED["make floor — against the live index"]
         A["ANSWERABLE questions — min top-1 = 0.671"]
@@ -615,8 +676,10 @@ flowchart LR
     GAP --> F["VRR_RETRIEVAL_MIN_SCORE = 0.62"]
     F --> NOTE["⚠️ nomic-embed-text scores UNRELATED text<br/>at 0.40 to 0.56 — an intuitive 0.35 admits<br/>everything and the agent never abstains"]
 
-    style NOTE fill:#fce8e6,stroke:#ea4335
-    style F fill:#e6f4ea,stroke:#34a853
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    class NOTE bad;
+    class F ok;
 ```
 
 A **negative** gap means no threshold separates the sets — that is a retrieval problem
@@ -629,6 +692,7 @@ nearest rows scores identically to one that knows when it has nothing.
 ## 9. The closed loop — approval, execution, and learned ρ
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 stateDiagram-v2
     [*] --> draft: anomaly fires, action_queue row created
     draft --> analyst: analyst approves
@@ -658,6 +722,7 @@ stateDiagram-v2
 Then the loop closes:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     EX["executed change + predicted ΔVRR"] --> WAIT["next month's build — make build"]
     WAIT --> ACT["actual post-VRR observed"]
@@ -665,7 +730,8 @@ flowchart LR
     EMA --> MEM["vrr_agent.pattern_memory — learned rho per pattern"]
     MEM -.->|"calibrates the NEXT recommendation"| NEXT["step 2 of section 6"]
 
-    style EMA fill:#e6f4ea,stroke:#34a853
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    class EMA ok;
 ```
 
 > **Honest status:** the write-back of `actual_post_vrr` and the EMA update are the top
@@ -677,6 +743,7 @@ flowchart LR
 ## 10. Evaluation — prompts, traces, scorers, judges
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     subgraph AUTHOR["authored + versioned"]
         PR["MLflow Prompt Registry — make prompts<br/>vrr_domain_primer · vrr_narrator<br/>vrr_knowledge_rag · vrr_general"]
@@ -705,8 +772,10 @@ flowchart TB
     DET2 --> REPORT["run metrics"]
     JUD -.->|"⚠️ UNMEASURED — see below"| REPORT
 
-    style DET2 fill:#e6f4ea,stroke:#34a853
-    style JUD fill:#fce8e6,stroke:#ea4335
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    class DET2 ok;
+    class JUD bad;
 ```
 
 ### The scorers, and what each one catches
@@ -788,13 +857,15 @@ Unity Catalog OSS is a **catalog**, not a query engine. It governs registered as
 in OSS — Lakehouse Federation is Databricks-only.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     AG["agent"] -->|"1. resolve name + permission"| UC["Unity Catalog OSS<br/>catalog-of-record"]
     UC -->|"2. authorized name"| AG
     AG -->|"3. execute"| PG["PostgreSQL"]
     UC -.->|"registered assets: schemas · tables · lineage"| PG
 
-    style UC fill:#f3e8fd,stroke:#a142f4
+    classDef model fill:#ece3fa,stroke:#7c3aed,stroke-width:1px,color:#3b1d70;
+    class UC model;
 ```
 
 So the enforcement boundary is the agent, not the database. Full reasoning and the
@@ -809,6 +880,7 @@ cosmetic: in the Streamlit version the approval role check was *hiding a button*
 is UX, not a control. Now the client asks and the **server decides**.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 sequenceDiagram
     autonumber
     participant B as Browser (React)
@@ -878,6 +950,7 @@ verified on every protected call.
 ### Signing in
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 sequenceDiagram
     autonumber
     participant U as Analyst
@@ -906,6 +979,7 @@ wrong: a login that distinguishes them tells a stranger which usernames are real
 ### Making a request
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     REQ["request from the workbench"] --> KIND{"read or write?"}
     KIND -->|"read: portfolio, trend,<br/>attribution, lineage, audit"| SERVE["served — no account needed"]
@@ -915,10 +989,10 @@ flowchart TB
     ROLE -->|"no"| R403["403 — refused, and the<br/>request body cannot argue"]
     ROLE -->|"yes"| DO["perform it, recording the<br/>token's subject as the actor"]
 
-    style SERVE fill:#e6f4ea,stroke:#34a853
-    style DO fill:#e6f4ea,stroke:#34a853
-    style R401 fill:#fce8e6,stroke:#ea4335
-    style R403 fill:#fce8e6,stroke:#ea4335
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef bad fill:#fde5e5,stroke:#c53030,stroke-width:1px,color:#7f1d1d;
+    class SERVE,DO ok;
+    class R401,R403 bad;
 ```
 
 Two things fall out of that shape:
@@ -941,6 +1015,7 @@ Two things fall out of that shape:
 ### Roles
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 stateDiagram-v2
     [*] --> draft: agent raises it
     draft --> analyst: analyst signs off

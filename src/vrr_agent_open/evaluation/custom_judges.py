@@ -31,16 +31,27 @@ JUDGE_MODEL = os.environ.get("VRR_JUDGE_MODEL", f"openai:/{CFG.llm_model}")
 # `…/v1` every judge died on `404 page not found`, silently, so `make eval` reported the
 # 6 deterministic scorers and none of the 3 judges — a green run that had scored nothing
 # it claimed to. Overridden by OPENAI_API_BASE if the caller sets one.
-JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE",
-                                f"{CFG.llm_base_url}/v1/chat/completions")
-# MLflow's openai provider refuses to start without a key, even when the endpoint is
-# Ollama and ignores it entirely. It must be a NON-EMPTY value, and `setdefault` is the
-# wrong tool: `.env` ships `OPENAI_API_KEY=` for the optional hosted path, `load_dotenv`
-# puts that empty string into the environment, and setdefault then sees the key as
-# already present and leaves "" in place. MLflow checks truthiness, not presence, so
-# every judge died with "OPENAI_API_KEY environment variable must be set" — before it
-# ever reached a model. Check the value, not the key.
-if not os.environ.get("OPENAI_API_KEY"):
+#
+# That endpoint applies ONLY when the judge is the local model. `openai:/gpt-4o` and `openai:/qwen2.5:7b`
+# are both "the openai provider" as far as MLflow is concerned, so a hardcoded Ollama
+# endpoint would quietly POST a hosted-model request to localhost:11434. If the judge
+# model is not one Ollama serves, leave base_url unset and let the SDK reach OpenAI.
+_LOCAL_JUDGE = JUDGE_MODEL.endswith(CFG.llm_model)
+_DEFAULT_BASE_URL = f"{CFG.llm_base_url}/v1/chat/completions" if _LOCAL_JUDGE else None
+# `or` rather than a `get` default on purpose: an OPENAI_API_BASE that is present but
+# empty is the same trap as the empty API key below, and should not win.
+JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE") or _DEFAULT_BASE_URL
+# A LOCAL judge still needs a non-empty key: MLflow's openai provider refuses to start
+# without one even when the endpoint is Ollama and ignores it entirely. It must be
+# NON-EMPTY, and `setdefault` is the wrong tool — `.env` shipped `OPENAI_API_KEY=` for
+# the optional hosted path, `load_dotenv` put that empty string into the environment, and
+# setdefault only fills an ABSENT key so it left "" in place. MLflow checks truthiness,
+# not presence, so every judge died on "OPENAI_API_KEY must be set" before reaching a
+# model. Check the VALUE, not the key.
+#
+# For a HOSTED judge, do not invent a key: a bogus one turns a clear "no credential"
+# into a 401 from OpenAI, which is a worse error to debug.
+if _LOCAL_JUDGE and not os.environ.get("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = "ollama-local"
 
 PROVENANCE_CITED = """
