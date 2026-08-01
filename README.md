@@ -215,6 +215,133 @@ starts in the green box.**
 
 ## 2. System map
 
+The whole system on one page. Corrections against the obvious reading are called out
+under it — the two that matter most are that the **approval chain does not go through the
+tool layer**, and that `vrr_curated` is written by an **offline build**, not at request
+time.
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true}}}%%
+flowchart TB
+    subgraph UI["React workbench — web/"]
+        portfolio["Portfolio"]
+        report["Pattern report<br/>chart · schematic · attribution"]
+        lineage["Lineage &amp; audit<br/>derivation graph"]
+        approvals["Approval board<br/>swim lanes"]
+        chatPanel["Chat panel<br/>floating, on every view"]
+    end
+
+    subgraph API["FastAPI — api/ · 25 endpoints · JWT on writes"]
+        routesPatterns["routes_patterns<br/>overview · trend · decompose<br/>audit · lineage · layout · analysis"]
+        routesApprovals["routes_approvals<br/>advance · board — role from token"]
+        routesChat["routes_chat<br/>one gated answer"]
+    end
+
+    subgraph AGENT["Agent — agent/"]
+        intentRouter["chat.py<br/>keyword intent router"]
+        analystPipeline["analyst.py<br/>5 steps, deterministic"]
+        stateGraph["graph.py<br/>LangGraph StateGraph<br/>plan → tools → gate → repair"]
+        toolsLayer["tools.py<br/>16 deterministic tools"]
+        llmBackend["providers.py<br/>Ollama · OpenAI · Anthropic"]
+    end
+
+    subgraph CORE["Deterministic core — core/ · pure, no I/O · 10 modules"]
+        physics["physics · decompose<br/>PVT ladder → reservoir volumes<br/>exact LMDI ΔVRR"]
+        rules["anomaly · audit · recommend<br/>rules, verdicts, ρ-calibrated<br/>safety-clamped change"]
+        faithfulness["faithfulness<br/>THE GATE<br/>drivers · direction · numbers"]
+        support["approval · knowledge<br/>pattern_layout · ids"]
+    end
+
+    subgraph BUILD["Offline build — pipeline/ · make seed · make build"]
+        builder["build.py<br/>raw → curated via core.physics"]
+    end
+
+    subgraph DB["PostgreSQL + pgvector"]
+        raw["vrr_raw<br/>field-shaped inputs"]
+        curated["vrr_curated<br/>computed VRR"]
+        agentDB["vrr_agent<br/>memory · queue · limits · knowledge"]
+    end
+
+    subgraph OPS["Ops"]
+        mlflow["MLflow<br/>spans · eval · prompts"]
+        ollamaSvc["Ollama<br/>qwen2.5:7b + nomic-embed"]
+        unity["Unity Catalog OSS<br/>catalog-of-record — make register"]
+    end
+
+    portfolio --> routesPatterns
+    report --> routesPatterns
+    lineage --> routesPatterns
+    approvals --> routesApprovals
+    chatPanel --> routesChat
+
+    routesPatterns --> toolsLayer
+    routesChat --> intentRouter
+    routesApprovals --> support
+
+    intentRouter -->|"default ~8s"| analystPipeline
+    intentRouter -->|"agentic=true ~1-2min"| stateGraph
+    analystPipeline --> toolsLayer
+    stateGraph --> toolsLayer
+    analystPipeline --> llmBackend
+    stateGraph --> llmBackend
+    llmBackend --> ollamaSvc
+
+    analystPipeline --> faithfulness
+    stateGraph --> faithfulness
+
+    toolsLayer --> physics
+    toolsLayer --> rules
+    toolsLayer --> support
+    toolsLayer --> curated
+    toolsLayer --> raw
+    toolsLayer --> agentDB
+
+    raw --> builder
+    builder --> curated
+    builder --> physics
+
+    support --> agentDB
+    agentDB -->|"learned ρ"| rules
+
+    AGENT -.->|"every span"| mlflow
+    DB -.->|"registration only"| unity
+
+    classDef ui fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef det fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef gate fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    classDef model fill:#ece3fa,stroke:#7c3aed,stroke-width:1px,color:#3b1d70;
+    classDef store fill:#eef1f4,stroke:#64748b,stroke-width:1px,color:#1f2937;
+    class portfolio,report,lineage,approvals,chatPanel ui;
+    class routesPatterns,routesApprovals,routesChat ui;
+    class toolsLayer,analystPipeline,physics,rules,support,builder det;
+    class faithfulness gate;
+    class intentRouter,stateGraph,llmBackend,ollamaSvc,mlflow model;
+    class raw,curated,agentDB,unity store;
+```
+
+**Five things the diagram is drawn to get right**, because the intuitive version of each is
+wrong:
+
+1. **The approval chain does not pass through the tool layer.** `routes_approvals.py`
+   imports `core.approval` and the DB helpers directly. The agent may only ever write a
+   *draft*; every stage after that is a person, and routing human decisions through the
+   agent's toolbelt would blur exactly the line this project exists to keep.
+2. **`vrr_curated` is written offline, not at request time.** `pipeline/build.py` reads
+   `vrr_raw` and materialises curated *using* `core.physics`. At request time the tools
+   READ curated — and `VRR_AUDIT` re-runs the same physics on raw rows to check the two
+   still agree. That recompute is the point of the Lineage view.
+3. **The gate sits on both answer paths**, not just the agentic one. Default and agentic
+   are gated identically; the difference is who picks the tools, never whether the output
+   is verified.
+4. **ρ flows backwards.** `vrr_agent` feeds `core.recommend` — the learned response factor
+   from executed adjustments is an input to the next recommendation. That back-edge is the
+   closed loop.
+5. **Unity Catalog is registration only.** `make register` publishes schemas and tables as
+   a catalog-of-record. It does not sit in the query path, and it does not enforce
+   anything at runtime — see [§12](#12-governance--unity-catalog-as-catalog-of-record).
+
+### The same thing as a poster
+
 ![Architecture](docs/img/architecture-d2.svg)
 
 > `make diagram` regenerates this from [docs/architecture.d2](docs/architecture.d2) (D2)
@@ -222,79 +349,6 @@ starts in the green box.**
 > [scripts/make_architecture_diagram.py](scripts/make_architecture_diagram.py) (Graphviz).
 > Both are *posters* — the mermaid below is the maintained one, because it lives in the
 > text and shows up in a diff.
-
-```mermaid
-%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
-flowchart TB
-    subgraph UI["🖥️ React workbench (web/) — make app"]
-        T1["🗺️ Portfolio — every pattern vs target"]
-        T2["📈 Report — trend + ΔVRR attribution"]
-        T3["🔎 Lineage — raw to curated + RECOMPUTE"]
-        T4["✅ Approval queue — draft to analyst to RM to site"]
-        DRAWER["💬 Chat drawer, docked right of every view<br/>transcript in vrr_agent.chat_history"]
-    end
-
-    subgraph APIL["🌐 FastAPI (api/) — 22 endpoints"]
-        RP["routes_patterns — reads, pass-through to tools"]
-        RA["routes_approvals — role checks ENFORCED here"]
-        RC["routes_chat — one gated answer per request"]
-    end
-
-    subgraph AGENT["🧠 agent/ — the reasoning layer"]
-        CHAT["chat.py — intent router"]
-        ANALYST["analyst.py — 5-step deterministic pipeline"]
-        GRAPH["graph.py — LangGraph StateGraph"]
-        TOOLS["tools.py — 16 deterministic tools"]
-        LLMC["llm.py + providers.py<br/>ollama · openai · anthropic"]
-    end
-
-    subgraph CORE["⚙️ core/ — pure, no I/O, unit-tested off-DB"]
-        direction LR
-        C1["physics · decompose"]
-        C2["anomaly · audit"]
-        C3["recommend · approval"]
-        C4["faithfulness · knowledge · ids"]
-    end
-
-    subgraph PG["🐘 PostgreSQL + pgvector"]
-        direction LR
-        RAW["vrr_raw<br/>7 tables"]
-        CUR["vrr_curated<br/>3 tables"]
-        AG["vrr_agent<br/>8 tables incl.<br/>reservoir_knowledge"]
-    end
-
-    subgraph OPS["🔭 Ops + governance"]
-        direction LR
-        ML["MLflow OSS<br/>traces · eval · prompt registry"]
-        UC["Unity Catalog OSS<br/>catalog-of-record"]
-        OLL["Ollama<br/>qwen2.5:7b + nomic-embed-text"]
-    end
-
-    UI --> APIL
-    DRAWER --> APIL
-    APIL --> CHAT
-    APIL --> TOOLS
-    CHAT -->|"default"| ANALYST
-    CHAT -->|"agentic=true"| GRAPH
-    ANALYST --> TOOLS
-    GRAPH --> TOOLS
-    GRAPH --> LLMC
-    ANALYST --> LLMC
-    TOOLS --> CORE
-    TOOLS --> PG
-    LLMC --> OLL
-    AGENT -.->|"every span"| ML
-    PG -.->|"names + RBAC"| UC
-
-    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
-    classDef mute fill:#eef1f4,stroke:#64748b,stroke-width:1px,color:#1f2937;
-    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
-    classDef model fill:#ece3fa,stroke:#7c3aed,stroke-width:1px,color:#3b1d70;
-    class CORE,APIL ok;
-    class PG mute;
-    class AGENT data;
-    class OPS model;
-```
 
 ### Stack, and why each piece
 
