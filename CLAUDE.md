@@ -347,6 +347,21 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - **Every shell block gets inline `#` comments** — one per line, saying what that line does
   and why it is needed here (same style as [docs/running.md](docs/running.md)). Never hand
   over a bare stack of commands to copy blindly.
+- **"What did you do so far / in this session?"** gets a **two-column table and nothing
+  else** — no prose intro, no closing summary, no commit hashes (they mean nothing to a
+  reader and cost a line each).
+
+  | column | holds |
+  |---|---|
+  | **Topic** | the change in plain words — what a person would call it, not the module name |
+  | **Detail** | what it does, **how it was done**, and the files touched, in one tight cell |
+
+  Rules for the Detail cell: name the actual files (`core/pattern_layout.py`,
+  `web/src/views/StreamView.tsx`) because "how" without "where" is not actionable; say
+  what was *verified* and how, since this project treats a check as part of the work; keep
+  it to two or three sentences. Put anything the user must act on — a live tunnel, an
+  unrotated key, a failing check — in its own final row rather than burying it. Group
+  related commits into one row; the reader wants the change, not the history.
 - `core/` stays pure (no I/O) so it unit-tests off-DB. Nothing imports `pipeline`.
 - Git: commit + push directly to `main`, no feature branches; **after pushing, always
   reply with the GitHub link** (repo: https://github.com/vamshi455/vrr-agent-open).
