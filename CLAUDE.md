@@ -347,6 +347,20 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - **Every shell block gets inline `#` comments** — one per line, saying what that line does
   and why it is needed here (same style as [docs/running.md](docs/running.md)). Never hand
   over a bare stack of commands to copy blindly.
+- **Spell out every abbreviation the first time it appears**, in prose, in code comments,
+  in diagrams and in commit messages. Write "random number generator (RNG)" once, then
+  `RNG` freely. This is not pedantry: this project mixes petroleum engineering, data
+  engineering and machine learning, so a reader fluent in one of those is a beginner in
+  the other two — `PVT`, `LMDI`, `MRR`, `DLQ`, `EMA` and `FVF` are each obvious to exactly
+  one audience. If a term genuinely cannot be expanded inline without wrecking the
+  sentence, add an explicit annotation line directly beneath, never a footnote elsewhere.
+  The domain terms that must always be expanded on first use: **VRR** (voidage replacement
+  ratio), **PVT** (pressure–volume–temperature), **FVF** (formation volume factor),
+  **LMDI** (logarithmic mean Divisia index), **STB** (stock tank barrel), **KSCF**
+  (thousand standard cubic feet), **UWI** (unique well identifier), **RNG** (random number
+  generator), **MRR** (mean reciprocal rank), **DLQ** (dead letter queue), **EMA**
+  (exponential moving average), **JWT** (JSON web token), **DAG** (directed acyclic
+  graph), **RAG** (retrieval-augmented generation).
 - **"What did you do so far / in this session?"** gets a **two-column table and nothing
   else** — no prose intro, no closing summary, no commit hashes (they mean nothing to a
   reader and cost a line each).
