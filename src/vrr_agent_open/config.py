@@ -39,6 +39,11 @@ class Config:
     # --- Unity Catalog OSS (governance catalog-of-record) ---
     uc_url: str = os.environ.get("VRR_UC_URL", "http://localhost:8080")
     uc_catalog: str = CATALOG
+    # --- Kafka (streaming simulator + ingestion; optional, off by default) ---
+    # Nothing in the core pipeline reads these. The seed, the build, the workbench and
+    # the agent all run exactly as before with no broker installed.
+    kafka_bootstrap: str = os.environ.get("VRR_KAFKA_BOOTSTRAP", "localhost:9092")
+    kafka_topic: str = os.environ.get("VRR_KAFKA_TOPIC", "vrr.volumes.daily.v1")
     # --- MLflow OSS (tracing / eval / registry) ---
     mlflow_uri: str = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
     # --- LLM narrator (pluggable; Ollama by default, fully local) ---

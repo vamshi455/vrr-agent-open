@@ -292,3 +292,83 @@ CREATE TABLE IF NOT EXISTS vrr_agent.chat_clear (
   cleared_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (username, id_pattern)
 );
+
+-- ===========================================================================
+-- vrr_stream — the streaming landing zone
+-- ===========================================================================
+-- Volumes ARRIVE here rather than being seeded. The seeded history ends
+-- 2026-07-31; the simulator continues forward from the next day, so this
+-- schema never competes with the demo data. A separate promotion step moves
+-- settled rows into vrr_raw.production_volumes_daily.
+CREATE SCHEMA IF NOT EXISTS vrr_stream;
+
+-- Calibrated per-completion base rates. pipeline/seed.py computes these inside
+-- generate_raw and throws them away; persisting them is what lets a single day
+-- be generated in isolation instead of replaying three years of draws.
+CREATE TABLE IF NOT EXISTS vrr_stream.completion_base_rate (
+  id_completion text PRIMARY KEY,
+  id_pattern    text NOT NULL,
+  role          text NOT NULL,              -- producer | injector
+  base_oil      double precision,
+  base_water    double precision,
+  base_gas      double precision,
+  base_inj      double precision,           -- AFTER _calibrate_injection
+  seed          bigint NOT NULL,
+  built_at      timestamptz DEFAULT now()
+);
+
+-- The landing table. Four clocks, because three of them are genuinely
+-- different: event_date is a SIMULATED business date (it runs ahead of the
+-- wall clock), so "now() - event_date" would be meaningless as a latency.
+--   end-to-end = stored_ts  - emitted_ts
+--   broker     = ingest_ts  - emitted_ts
+--   sink       = stored_ts  - ingest_ts
+CREATE TABLE IF NOT EXISTS vrr_stream.volume_events (
+  id_completion text NOT NULL,
+  event_date    date NOT NULL,              -- simulated production date
+  alloc_oil_vol_stb        double precision,
+  alloc_water_vol_stb      double precision,
+  alloc_gas_vol_kscf       double precision,
+  alloc_water_inj_vol_stb  double precision,
+  alloc_gas_inj_vol_kscf   double precision,
+  uom           text DEFAULT 'OilField',
+  emitted_ts    timestamptz NOT NULL,       -- producer published
+  ingest_ts     timestamptz NOT NULL,       -- consumer read it off the topic
+  -- clock_timestamp(), NOT now(): now() is TRANSACTION START time and is constant
+  -- for a whole executemany, so every row in a batch shared one value and the
+  -- measured latency was a transaction boundary rather than a wall clock.
+  stored_ts     timestamptz DEFAULT clock_timestamp(),  -- Postgres wrote the row
+  partition     int,
+  "offset"      bigint,
+  promoted_at   timestamptz,                -- NULL until promoted to vrr_raw
+  -- Incremented on conflict. sum(n_deliveries - 1) is literal, countable evidence
+  -- that at-least-once delivery really did redeliver something.
+  n_deliveries  int NOT NULL DEFAULT 1,
+  PRIMARY KEY (id_completion, event_date)   -- the ON CONFLICT target: replaying
+);                                          -- an offset is a no-op, not a dupe
+
+CREATE INDEX IF NOT EXISTS volume_events_stored_idx
+  ON vrr_stream.volume_events (stored_ts);
+CREATE INDEX IF NOT EXISTS volume_events_unpromoted_idx
+  ON vrr_stream.volume_events (event_date) WHERE promoted_at IS NULL;
+
+-- Spark's own numbers, captured from StreamingQueryProgress by a listener.
+CREATE TABLE IF NOT EXISTS vrr_stream.batch_progress (
+  batch_id    bigint PRIMARY KEY,
+  ts          timestamptz DEFAULT now(),
+  input_rows  bigint,
+  rows_per_second double precision,
+  duration_ms bigint,
+  sources     jsonb
+);
+
+-- Anything that failed to parse or write is kept, not dropped. A malformed
+-- payload must not be able to kill the consumer.
+CREATE TABLE IF NOT EXISTS vrr_stream.dead_letter (
+  id        bigserial PRIMARY KEY,
+  ts        timestamptz DEFAULT now(),
+  partition int,
+  "offset"  bigint,
+  payload   text,
+  error     text
+);

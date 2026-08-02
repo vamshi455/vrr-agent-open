@@ -137,6 +137,27 @@ class RawData:
     pattern_target: list = field(default_factory=list)
 
 
+@dataclass
+class Setup:
+    """Everything `generate_raw` computes BEFORE the day loop.
+
+    Split out because the streaming producer needs the calibrated per-completion base
+    rates without regenerating three years of daily volumes. `rng` travels with it: the
+    day loop continues consuming the SAME generator, so extracting this changed no
+    random draw and `generate_raw` still returns byte-identical rows.
+    """
+    raw: RawData
+    specs: tuple
+    months: list
+    producers_of: dict
+    injectors_of: dict
+    base_oil: dict
+    base_water: dict
+    base_gas: dict
+    base_inj: dict
+    rng: random.Random
+
+
 def _month_starts(start: dt.date, n: int) -> list[dt.date]:
     out, y, m = [], start.year, start.month
     for _ in range(n):
@@ -177,9 +198,12 @@ def _calibrate_injection(*, producers, injectors, pvt_points, pressure, factor,
     return start_vrr * prod_res / inj_res
 
 
-def generate_raw(seed: int = SEED, n_months: int = N_MONTHS, start: dt.date = START,
-                 n_patterns: int = N_PATTERNS) -> RawData:
-    """Build the synthetic raw field. Pure: deterministic given the parameters."""
+def _setup(seed: int = SEED, n_months: int = N_MONTHS, start: dt.date = START,
+           n_patterns: int = N_PATTERNS) -> Setup:
+    """Registries, PVT, pressure, allocation and the calibrated base rates.
+
+    Everything up to but not including the daily volume loop. Pure and deterministic.
+    """
     rng = random.Random(seed)
     raw = RawData()
     months = _month_starts(start, n_months)
@@ -314,6 +338,21 @@ def generate_raw(seed: int = SEED, n_months: int = N_MONTHS, start: dt.date = ST
             start_vrr=spec.target_vrr)
         for c in injectors_of[spec.id_pattern]:
             base_inj[c] *= scale
+
+    return Setup(raw=raw, specs=specs, months=months,
+                 producers_of=producers_of, injectors_of=injectors_of,
+                 base_oil=base_oil, base_water=base_water,
+                 base_gas=base_gas, base_inj=base_inj, rng=rng)
+
+
+def generate_raw(seed: int = SEED, n_months: int = N_MONTHS, start: dt.date = START,
+                 n_patterns: int = N_PATTERNS) -> RawData:
+    """Build the synthetic raw field. Pure: deterministic given the parameters."""
+    s = _setup(seed, n_months, start, n_patterns)
+    raw, rng, months, specs = s.raw, s.rng, s.months, s.specs
+    producers_of, injectors_of = s.producers_of, s.injectors_of
+    base_oil, base_water = s.base_oil, s.base_water
+    base_gas, base_inj = s.base_gas, s.base_inj
 
     # ---- daily volumes, keyed by COMPLETION only ----------------------------------
     for spec in specs:

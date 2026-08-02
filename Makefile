@@ -4,6 +4,7 @@
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
 .PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users diagram api web web-build app share agent \
+	stream-init stream-produce \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -105,6 +106,17 @@ share:         ## expose the workbench publicly through an ngrok tunnel (demo po
 	@echo "Tunnelling :8000 — anyone with the printed URL can reach this machine."
 	@echo "Stop with Ctrl-C; the URL dies with it."
 	ngrok http 8000
+
+stream-init:   ## create the vrr_stream schema + persist the calibrated base rates
+	@command -v psql >/dev/null || { echo "psql not found — brew install libpq && brew link --force libpq"; exit 1; }
+	psql "$${VRR_PG_DSN:-postgresql://vrr:vrr@localhost:5432/vrr}" \
+	  -v ON_ERROR_STOP=1 -f src/vrr_agent_open/pipeline/schema.sql
+	$(PYTHON) -m vrr_agent_open.streaming.rates
+
+stream-produce: ## simulate production volumes (rate=days/sec days=N transport=direct|kafka)
+	$(PYTHON) -m vrr_agent_open.streaming.producer \
+	  $(if $(rate),--rate $(rate),) $(if $(days),--days $(days),) \
+	  $(if $(transport),--transport $(transport),)
 
 agent:         ## run one agent question from the CLI
 	$(PYTHON) -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"
