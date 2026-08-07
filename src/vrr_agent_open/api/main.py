@@ -28,7 +28,8 @@ from ..agent import llm as LLM
 from ..agent import tracing as TRACING
 from ..config import load_config
 from . import auth as AUTH
-from . import routes_approvals, routes_auth, routes_chat, routes_patterns
+from . import (routes_approvals, routes_architecture, routes_auth, routes_chat,
+               routes_knowledge, routes_patterns)
 from . import share as SHARE
 from .db import query
 
@@ -69,8 +70,14 @@ if AUTH.SECRET_IS_EPHEMERAL:
 
 app.include_router(routes_auth.router)
 app.include_router(routes_patterns.router, dependencies=SHARE.READ_GUARD)
+# A read, so it inherits the same guard: in share mode the system's own map is behind the
+# token like every other read. It carries counts only — no hosts, no connection strings.
+app.include_router(routes_architecture.router, dependencies=SHARE.READ_GUARD)
 app.include_router(routes_approvals.router)
 app.include_router(routes_chat.router)
+# No SHARE.READ_GUARD: every route in this one already requires a token of its own, and
+# the upload/review routes require a data_steward or admin role on top of that.
+app.include_router(routes_knowledge.router)
 
 
 @app.get("/api/health", tags=["system"])
@@ -88,10 +95,15 @@ def health() -> dict:
     except Exception:
         pass
 
-    knowledge = {"docs": 0, "chunks": 0}
+    knowledge = {"docs": 0, "chunks": 0, "pending_review": 0}
     try:
         knowledge = query("SELECT count(DISTINCT doc_id) AS docs, count(*) AS chunks "
                           "FROM vrr_agent.reservoir_knowledge")[0]
+        # Surfaced so the workbench can badge the review queue: a document sitting
+        # unapproved is invisible to every search, and nothing else in the UI would say so.
+        knowledge["pending_review"] = query(
+            "SELECT count(*) AS n FROM vrr_agent.knowledge_registry "
+            "WHERE status = 'pending_review'")[0]["n"]
     except Exception:
         pass
 

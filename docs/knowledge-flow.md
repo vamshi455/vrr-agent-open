@@ -136,3 +136,90 @@ python -m vrr_agent_open.pipeline.knowledge_ingest      # register + ingest appr
 # approve in SQL first:
 #   UPDATE vrr_agent.knowledge_registry SET status='approved' WHERE file_name='your_report.pdf';
 ```
+
+## The same flow, from the browser (since 2026-08-02)
+
+`make knowledge` still works exactly as above. The workbench's **Knowledge** view drives
+the identical pipeline over HTTP, so a document uploaded in a browser and one dropped in
+the folder produce byte-identical chunks — `pipeline/knowledge_ingest._embed_one` is the
+single implementation both call.
+
+```
+browser ──POST /api/knowledge/upload──▶ validate ──▶ quarantine (pending_review)
+                                                          │  NOT searchable
+                                    GET …/preview ◀────────┤  extracted text + PII
+                                                          ▼
+                          POST …/approve ──▶ _embed_one ──▶ pgvector ──▶ askable in chat
+```
+
+| Endpoint | Role | What it does |
+|---|---|---|
+| `POST /api/knowledge/upload` | data_steward, admin | validates, stores, registers `pending_review`. **Embeds nothing.** |
+| `GET /api/knowledge/documents` | any signed-in | review queue + live corpus + quota usage |
+| `GET …/{id}/preview` | data_steward, admin | real extracted text (PII-redacted), page and chunk counts |
+| `POST …/{id}/approve` | data_steward, admin | embeds in the request; `reviewed_by` from the token |
+| `POST …/{id}/reject` | data_steward, admin | records the refusal and its reason |
+| `DELETE …/{id}` | data_steward, admin | drops the chunks; the registry row survives |
+
+### The human gate did not move
+
+The upload button does **not** embed. That was a deliberate refusal: `core/knowledge.py`
+has always said VRR-relevance is a human judgement, and making a spinner shorter is not a
+reason to delete a guardrail. What changed is only *where the human exercises it* — a
+review panel showing the actual extracted text instead of a `psql UPDATE`. Approval then
+embeds in the same request, so it is instant for the reviewer while still being a
+decision, attributed and timestamped.
+
+`tests/test_knowledge_upload.py::test_upload_does_not_embed` stubs the ingest path to
+raise, so a future refactor that quietly embeds on arrival fails loudly.
+
+### What the validator refuses
+
+`core/upload_validation.py` is pure (bytes + filename → verdict) and unit-tested off-DB.
+The browser's `accept=` filter is a convenience for the file picker and is **not counted
+as a control** — any HTTP client skips it.
+
+| Check | Refuses |
+|---|---|
+| allowlist | anything outside the 7 suffixes `document_loaders` can parse |
+| filename | `../`, `C:\…`, NUL bytes, shell metacharacters, >180 chars |
+| magic bytes | `.pdf` holding a ZIP, `x.exe.pdf`, MZ/ELF/gzip/RAR/OLE under any extension |
+| text check | binary wearing `.txt` — by control-character fraction, not by codec |
+| size | per kind: pdf 25 · docx 15 · csv 10 · html/text 5 MB, streamed and aborted mid-upload |
+| zip bombs | `.docx` expansion ratio >120:1, >200 MB unpacked, traversal in entry names |
+| dedupe | identical content under a new name (sha256, unique index) |
+| quota | 200 documents / 20,000 chunks — a vector index is a *ranked* resource |
+
+Two of these were found by running it rather than reading it. **"Try UTF-8, fall back to
+Latin-1" is not a text check**: Latin-1 assigns all 256 byte values so the decode never
+fails, leaving only the NUL test — 200 bytes of `/dev/urandom` uploaded with a 201. It
+now measures the control-character fraction (prose ~0%, random bytes ~25%, threshold 10%).
+And `WHERE (%(s)s IS NULL OR …)` 500s with `AmbiguousParameter`; the stubbed-DB tests
+could not see it and the first screenshot could.
+
+## Two corpora in one table (since 2026-08-02)
+
+`doc_kind` splits `reservoir_knowledge` into `reservoir` (procedures, standards — what a
+reservoir engineer reads) and `app_help` (this workbench's own user guide). `search()`
+defaults to `reservoir` and **never mixes them**.
+
+That is not tidiness. Top-k is a fixed budget, so "how do I approve a change?" would
+otherwise compete with the injection-change *procedure* for the same four slots — and the
+procedure wins on similarity, answering a question about a button with a paragraph about
+valve limits.
+
+```
+                       ┌─ doc_kind='reservoir'  ← uploads, make knowledge
+vrr_agent.reservoir_knowledge
+                       └─ doc_kind='app_help'   ← make guide (generated)
+```
+
+`make guide` regenerates `docs/app-guide/*.md` **from `core/help_topics.py`** and ingests
+it. The guide is generated rather than written so it cannot drift from the deterministic
+answers the chat gives — a stale user guide inside a vector index is worse than none,
+because the agent quotes it with a citation. Editing the markdown by hand is overwritten.
+
+App questions are answered from the written topic table first (`chat._help_answer`);
+retrieval over `app_help` is only the long-tail fallback. The reason is the one this whole
+project turns on: a fabricated *figure* is caught by `core.faithfulness`, but fabricated
+*UI* makes no numeric claim and passes every check here.

@@ -17,9 +17,10 @@ from ..agent import chat as CH
 from ..agent import history as HIST
 from ..agent import tools as T
 from ..agent import tracing as TRACING
-from .auth import CurrentUser
+from . import ratelimit as RL
+from .auth import CurrentUser, OptionalUser
 from .db import execute, query
-from .schemas import ChatRequest
+from .schemas import PATTERN_ID_RE, ChatRequest
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -31,7 +32,14 @@ def ask(body: ChatRequest, user: CurrentUser) -> dict:
     Authenticated because it spends real compute — an open endpoint here is an open
     invitation to drive someone else's GPU. `asked_by` in the shared transcript comes
     from the token, so the drawer shows who actually asked.
+
+    Rate-limited on top of that, because auth answers *who* and never *how much*: a
+    signed-in user could otherwise hold `agentic=true` loops open back to back. The
+    agentic path carries its own tighter budget since it runs 1-2 minutes per call.
     """
+    RL.hit("chat", user["username"])
+    if body.agentic:
+        RL.hit("chat_agentic", user["username"])
     try:
         result = CH.respond(body.question, pattern=body.pattern, date=body.date,
                             agentic=body.agentic)
@@ -83,24 +91,32 @@ def _cleared_before(username: str, pattern: str):
 
 
 @router.get("/chat/history")
-def history(pattern: str = Query(...), limit: int = Query(50, le=200),
-            user: str | None = Query(None)) -> list[dict]:
+def history(viewer: OptionalUser, pattern: str = Query(..., max_length=64),
+            limit: int = Query(50, ge=1, le=200)) -> list[dict]:
     """This pattern's transcript, oldest first — shared, and it survives a refresh.
 
     Filtered by the caller's personal `cleared_at` cutoff when they have one. The rows
     themselves are never touched: the transcript is an audit record and the traces behind
     it are the evidence, so "clear" means "stop showing me this", not "delete it".
+
+    Stays readable signed-out, but WHOSE cutoff to apply now comes from the bearer token
+    rather than a `?user=` query parameter. It used to be the latter, which let any caller
+    ask for the view another account had configured — harmless here, since the transcript
+    is shared by design and nothing extra was exposed, but a client-asserted identity in
+    a file whose every sibling takes identity from the signature.
     """
+    if not PATTERN_ID_RE.match(pattern):
+        raise HTTPException(400, "pattern must be 1-64 chars of A-Z, a-z, 0-9, _ or -")
     try:
         HIST.ensure_table()
-        since = _cleared_before(user, pattern) if user else None
+        since = _cleared_before(viewer["username"], pattern) if viewer else None
         return HIST.recent(pattern, limit=limit, since=since)
     except Exception:
         return []                               # no table yet is empty, not an error
 
 
 @router.post("/chat/clear")
-def clear(user: CurrentUser, pattern: str = Query(...)) -> dict:
+def clear(user: CurrentUser, pattern: str = Query(..., max_length=64)) -> dict:
     """Hide this pattern's transcript FOR THIS USER from now on.
 
     Records a cutoff; deletes nothing. Everyone else still sees the full history, the

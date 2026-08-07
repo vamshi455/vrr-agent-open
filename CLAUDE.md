@@ -13,9 +13,9 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
 - **Unity Catalog OSS** — governance catalog-of-record (RBAC + lineage; NOT a query engine)
 - **MLflow OSS** — tracing / eval / registry
 - **FastAPI + React** (Vite · TypeScript · Tailwind) — the workbench, branded as the
-  fictional operator **Meridian Petroleum**: header with identity top-right, 4 views
-  (Portfolio · Report · Lineage · **swim-lane approval board**) and a floating chatbot,
-  over a 25-endpoint API. One type scale (`micro/label/body/sub/title/display`) and one
+  fictional operator **Meridian Petroleum**: header with identity top-right, 6 views
+  (Portfolio · Report · Lineage · **swim-lane approval board** · **Knowledge upload +
+  review** · **live architecture map**) and a floating chatbot, over a 32-endpoint API. One type scale (`micro/label/body/sub/title/display`) and one
   semantic palette (signal/suspect/offtarget + a hue per approval stage) — no ad-hoc
   `text-[11px]`. Streamlit was retired 2026-07-30.
 - **OAuth2 password grant + JWT bearer** (`api/auth.py`, since 2026-07-30) — writes and
@@ -35,9 +35,9 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   AND tool-call before you switch. Keys live in `.env` only (see `.env.example`).
 - **docker-compose** — postgres+pgvector · unitycatalog · mlflow
 
-## Current status (2026-08-01)
+## Current status (2026-08-02)
 - ✅ **Deterministic core ported verbatim + tested**: `core/` = physics, recommend,
-  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **199 tests pass**
+  anomaly, knowledge, approval, decompose, faithfulness, ids, audit. **341 tests pass**
   (`pytest -q`, no stack needed — incl. `tests/test_graph.py`, which walks every path
   through the LangGraph loop with the model and Postgres stubbed).
 - ✅ **Seed + builder done**: `pipeline/seed.py` (pure, seeded generator → `vrr_raw` +
@@ -214,6 +214,110 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   - **Treat `provenance_cited` / `decision_complete` / `grounded_in_documents` as
     UNMEASURED.** The 6 deterministic scorers are the real signal.
 
+- ✅ **Knowledge upload from the browser, with the human gate intact** (2026-08-02).
+  `api/routes_knowledge.py` + `web/src/views/KnowledgeView.tsx` + `core/upload_validation.py`
+  (pure, 46 tests). Upload → **quarantine, embedding nothing** → a `data_steward` reads the
+  REAL extracted text and the PII findings → approve → embeds in that request → askable in
+  chat seconds later. The upload button deliberately does not embed: `core/knowledge.py`
+  has always said VRR-relevance is a human judgement, and the fix for "instant" was moving
+  where the human exercises it (a review panel, not a `psql UPDATE`), not deleting it.
+  `test_upload_does_not_embed` stubs the ingest path to raise so that cannot regress.
+  Validation is layered — role (data_steward/admin, a signed claim) · per-user rate budget
+  · streamed size cap · allowlist + magic bytes + zip-bomb + traversal · corpus quota ·
+  sha256 dedupe. Flow + refusal table: [docs/knowledge-flow.md](docs/knowledge-flow.md).
+  Verified live end to end: analyst 403, forged token 401, disguised MZ-as-`.pdf` 422,
+  traversal filename flattened into quarantine, the agent **abstaining** on the document
+  before approval and citing it by file+page after, and 0 PII rows in the index.
+  **Three bugs came from running it, not reading it**: (1) `user: CurrentUser = require_role(…)`
+  silently skips the role check — an `Annotated[…, Depends]` annotation beats the default,
+  so every authenticated caller could upload; (2) "try UTF-8, fall back to Latin-1" is not
+  a text check, because Latin-1 decodes all 256 byte values and never raises — 200 bytes
+  of `/dev/urandom` uploaded 201, now judged by control-character fraction; (3)
+  `WHERE (%(s)s IS NULL …)` 500s with `AmbiguousParameter` and needs `::text` — invisible
+  to stubbed-DB tests, obvious on the first screenshot.
+
+- ✅ **Chat input validation + per-user budgets** (2026-08-02, `api/ratelimit.py`).
+  `POST /chat` had `question: str(1..2000)` and nothing else: `pattern`/`date` were free
+  strings whose malformation surfaced as a 502 from inside a tool, and auth established
+  *who* was asking while nothing established *how much*. Now NFKC-normalised and
+  control-stripped questions (a full-width variant routed differently — the intent router
+  keys on words), shape-checked `pattern`/`date` returning a 422 that names the field, and
+  fixed-window budgets: chat 20/min, agentic 5/5min, upload 10/10min, with a truthful
+  `Retry-After`. `GET /chat/history?user=` was a client-asserted identity and now comes
+  from the token (`auth.optional_user`, so signed-out reads still work). In-process
+  counters — fine on a laptop, needs Redis behind a load balancer, said so in the module.
+
+- ✅ **The agent explains the application, deterministically** (2026-08-02).
+  `core/help_topics.py` (pure, 11 topics, 37 tests) + a `help` intent in `agent/chat.py`.
+  App questions were falling into `explain` and being answered as if they were reservoir
+  questions — "how do I move a card from the analyst zone to the RM zone?" came back as a
+  list of patterns. **Written answers, not generated ones**: a fabricated FIGURE is caught
+  by `core.faithfulness`, but fabricated UI ("click Export, top right") makes no numeric
+  claim and passes every check this project has, so the reader hunts for a button that
+  does not exist. RAG is the fallback for the long tail only.
+  - **Corpus split** — `doc_kind` on `reservoir_knowledge`/`knowledge_registry`
+    (`reservoir` | `app_help`), and `search()` filters on it. Top-k is a fixed budget: a
+    guide page about the Approvals screen competing with the injection-change PROCEDURE
+    means one of them loses a slot it needed. Live: 4 docs/35 chunks reservoir, 6/41
+    app_help, never searched together.
+  - `make guide` (`scripts/build_app_guide.py`) GENERATES `docs/app-guide/*.md` from the
+    topic table and ingests it, so the guide cannot drift from the answers — one source of
+    truth, and editing the markdown by hand is overwritten. These skip the human approval
+    gate deliberately: they are first-party, generated from this repo by an operator
+    running a make target, and nothing in them came from a browser.
+  - Tests assert the help text stays TRUE against the code: view names vs `App.tsx`, the
+    chain vs `APPROVER_FOR_STAGE`, roles vs the `app_user` CHECK, extensions vs
+    `ALLOWED_SUFFIXES`. Rename a view and the suite fails rather than the agent describing
+    an app that no longer exists.
+  - **Two routing bugs found by running it**: the longest-single-keyword ranking answered
+    "which role can approve?" with the board layout (`approve` 7 chars beat `role` 4) —
+    now scored on the total length of every match; and "zone"/"card"/"column" were not app
+    nouns, so the exact question this feature exists for routed to `explain`. People
+    describe a board in the vocabulary of every other board tool.
+
+- ✅ **Drag-and-drop on the approval board + one type scale for the whole UI** (2026-08-02).
+  Cards lift only when a legal move exists, and exactly one lane accepts the drop — only
+  that lane calls `preventDefault` on `dragover`, so the BROWSER shows "no drop" elsewhere
+  and the chain cannot be skipped. Drop calls the same `POST /queue/{id}/advance` the
+  button calls; the buttons stay as the keyboard route. Verified live: as `rm.demo` 5
+  draggable cards, as `analyst.demo` 24; a real drop moved CASTOR analyst→rm with
+  `stage_by` from the token; `site`/`executed`/`rejected` all refused the drop.
+  UI size is now one lever — `html { font-size: var(--ui-scale, 68%) }` with everything in
+  rem, so type AND padding scale together the way browser zoom does. **68% is the default
+  at the operator's request and puts body text near 8px, under the 11px floor the July
+  audit set** — hence the Compact/Default/Large control in the header (`web/src/ui-scale.ts`),
+  applied before first paint and persisted.
+
+- ✅ **The system draws itself, with live counters** (2026-08-03). A sixth view,
+  `web/src/views/ArchitectureView.tsx` over `GET /api/architecture`
+  (`api/routes_architecture.py`) and `core/architecture.py` (pure, 43 tests). Five bands —
+  ingest · the turn · knowledge · approval chain · LLM ops — 25 clickable boxes, and every
+  figure on them measured when the request lands: row counts, 16 tools, 10 intents, gate
+  repairs, chunks split 4 reservoir / 6 help, cards per lane, `3 judge(s) · UNMEASURED`
+  stated on the box rather than hidden. **A box whose probe fails renders with no number,
+  never a zero** — "no cards in this lane" and "I could not read the queue" are different
+  claims, and `_resolve` refuses to format a partial tuple. Topology and geometry live in
+  `core/` for the same reason `pattern_layout` does: the tests assert the diagram still
+  matches the code (approval band vs `core.approval.STAGES`, every file path it points at
+  exists, every fact key has a probe behind it), so renaming a module fails the suite
+  instead of leaving a confident wrong picture on screen.
+  - **Four bugs came from running and rendering it, not reading it**: (1) `db.query`
+    passes `params or {}`, so psycopg always parses the SQL for placeholders and the `%`
+    in an `ILIKE '%repair%'` raised — the box just went blank, because `_scalar` swallows
+    probe errors. Now `strpos`. **This landmine applies to any future caller of
+    `db.query` with a `%` in it.** (2) A band subtitle placed at `title.length * 7.2`
+    ignored letter-spacing and printed "KNOWLEDGEa document cannot be searched…". (3) An
+    edge caption drawn at the vertical midpoint landed inside a *third* band, across the
+    `analyst` card — cross-band captions now sit in the source band's own padding.
+    (4) At 375px the card stretched to 924px inside a 353px grid track and clipped its
+    own heading, while `document.scrollWidth` reported no overflow the whole time: a grid
+    item defaults to `min-width: auto`, so the 900px SVG minimum won. `min-w-0` fixes it.
+  - Polls every 5s, paused while the tab is hidden. Boxes are `g[role="button"]
+    tabIndex=0` with Enter/Space and a drawn focus ring — verified by focusing and
+    pressing Enter in a headless browser, not by inspection.
+  - `core/help_topics.py` gained the sixth view so the agent's own description of the app
+    stays true; `test_view_names_match_the_actual_nav` covers it.
+
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `governance/uc_register.py` — column population from information_schema for lineage
 
@@ -310,7 +414,8 @@ These cost real time in earlier sessions. Check them before debugging anything e
 
 1. **Never run `python`/`python3.12` directly.** Both resolve to conda base or homebrew
    3.14 here, neither of which has psycopg. Use `make <target>`, which selects
-   `.venv/bin/python`. A bare `pytest` has the same problem — `make test`.
+   `.venv/bin/python`. A bare `pytest` has the same problem — `make test`, whose recipe
+   was itself a bare `pytest` until 2026-08-02 and so failed at collection on this box.
 2. **Env vars are read once at import.** A server started before `.env` existed keeps the
    old values forever; refreshing the browser cannot fix it. After editing `.env`,
    restart the process. Symptom: the header says NOT TRACED while MLflow is demonstrably
@@ -340,6 +445,28 @@ queries in OSS (Lakehouse Federation is Databricks-only). The agent resolves nam
 permission from UC, then executes against Postgres. Full reasoning in docs/design.md.
 
 ## Conventions (carried from the parent repo)
+
+- **PLAN FIRST. Say what you are about to change, and wait.** (Added 2026-08-02 at
+  Vamshi's instruction, after a session that shipped a large feature in one unbroken run.)
+  For **any** requested change — a one-line tweak included — the first reply is a plan,
+  not an edit:
+
+  | the plan must state | why |
+  |---|---|
+  | every file to be created or modified | so the blast radius is visible before it exists |
+  | what each change does, in one line | so a wrong assumption is caught in seconds, not after 500 lines |
+  | anything it breaks, loosens or contradicts | especially a documented guardrail (the 11px floor, the human approval gate, `core/` purity) |
+  | any decision with more than one defensible answer | ask; do not pick silently |
+  | how it will be verified | tests, a live call, a screenshot — named up front |
+
+  Then **stop and wait for approval.** Do not begin editing because the plan seems
+  obviously right. Exceptions, and only these: the user says "go ahead"/"just do it", or
+  the request is purely a question with no file change in it.
+
+  Investigation is not a change — reading files, grepping, running `make test`, curling a
+  running endpoint, and taking a screenshot are all fine before the plan, and usually
+  necessary to write a good one.
+
 - Be concise; lead with the answer.
 - **"What is X?" questions** (a make target, a script, a module) get a crisp answer: one
   line saying what it maps to, then ≤5 bullets on what it does and why it exists in *this*
@@ -394,9 +521,11 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
    is the last open link in the closed loop: the function exists and is unit-tested, the
    job that feeds it observed outcomes does not.
 3. **A `status` intent** — "are you connected to an LLM?", "which model?", "how many
-   patterns?" currently fall through to `explain` and get answered as if they were VRR
-   questions. `/api/health` already has the facts; the answer should be deterministic,
-   because a model guessing about its own configuration is a bad failure mode.
+   patterns?" still fall through to `explain`. `/api/health` already has the facts; the
+   answer should be deterministic, because a model guessing about its own configuration is
+   a bad failure mode. The `help` intent (2026-08-02) is the pattern to copy — same
+   problem, same shape of fix, and `core/help_topics.py` shows how to keep the written
+   answer pinned to the code by test.
 4. `governance/uc_register.py` — populate columns from information_schema for lineage.
 5. Verify end-to-end on Docker (`docker compose up` → seed → queue → app). Note
    `docker-compose.yml` publishes MLflow on `5000:5000`, which will not bind on this Mac —

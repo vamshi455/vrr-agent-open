@@ -62,9 +62,29 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Multipart POST. Deliberately does NOT set Content-Type: the browser has to generate it
+ * itself so it can append the `boundary=` parameter, and setting it by hand produces a
+ * body the server cannot parse.
+ */
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST", headers: authHeaders(), body: form,
+  });
+  if (!res.ok) throw await fail(res, path);
+  return res.json() as Promise<T>;
+}
+
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) throw await fail(res, path);
+  return res.json() as Promise<T>;
+}
+
 /** A 401 means the token is gone, expired or forged — drop it and ask for a new one. */
 async function fail(res: Response, path: string): Promise<ApiError> {
-  const err = new ApiError(res.status, await detail(res), path);
+  const raw = await rawDetail(res);
+  const err = new ApiError(res.status, flatten(raw) || res.statusText, path, raw);
   if (res.status === 401) {
     session.clear();
     onUnauthorized.handler?.();
@@ -72,18 +92,50 @@ async function fail(res: Response, path: string): Promise<ApiError> {
   return err;
 }
 
-async function detail(res: Response): Promise<string> {
+async function rawDetail(res: Response): Promise<unknown> {
   try {
-    const body = await res.json();
-    return typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    return (await res.json()).detail;
   } catch {
-    return res.statusText;
+    return null;
   }
 }
 
+/**
+ * Turn a FastAPI `detail` into one readable line.
+ *
+ * It arrives in three shapes and they are not interchangeable: a plain string from
+ * `HTTPException`, a LIST of `{loc, msg}` from a Pydantic 422, and — from the upload
+ * endpoint — an object carrying every validation failure at once. `JSON.stringify` on
+ * the last two produced `[object Object]`-grade noise in the UI, which is how a precise
+ * server-side rejection reached the user as an unreadable blob.
+ */
+function flatten(detail: unknown): string {
+  if (!detail) return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => {
+        const e = d as { loc?: unknown[]; msg?: string };
+        const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : undefined;
+        return field ? `${field}: ${e.msg ?? ""}` : (e.msg ?? String(d));
+      })
+      .join("; ");
+  }
+  const o = detail as { rejected?: string[] };
+  if (Array.isArray(o.rejected)) return o.rejected.join("; ");
+  return JSON.stringify(detail);
+}
+
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public path: string) {
+  constructor(public status: number, message: string, public path: string,
+              /** The unflattened body, so a caller can render each reason on its own row. */
+              public detail: unknown = null) {
     super(message);
+  }
+  /** Every rejection reason from the upload validator, or [] for other failures. */
+  get reasons(): string[] {
+    const o = this.detail as { rejected?: string[] } | null;
+    return Array.isArray(o?.rejected) ? o.rejected : [];
   }
 }
 
@@ -281,8 +333,101 @@ export interface Health {
   llm: { available: boolean; model: string | null; provider: string };
   tracing: { enabled: boolean; uri: string };
   postgres: { host: string; monthly_rows: number };
-  knowledge: { docs: number; chunks: number };
+  knowledge: { docs: number; chunks: number; pending_review?: number };
   retrieval_min_score: number;
+}
+
+// -------------------------------------------------------------- architecture ----
+/**
+ * The system describing itself. Geometry comes from `core/architecture.py` for the same
+ * reason the pattern schematic does — so the figure is unit-tested off-DB and React
+ * cannot quietly disagree with it about where a box goes.
+ *
+ * `value` is `null` when the fact behind a box could not be measured. Render nothing in
+ * that case; do NOT substitute a zero or a dash that reads like a measurement.
+ */
+export interface ArchNode {
+  id: string;
+  band: string;
+  label: string;
+  value: string | null;
+  what: string;
+  files: string[];
+  guardrail: string;
+  x: number; y: number; w: number; h: number;
+}
+
+export interface ArchBand {
+  id: string; title: string; sub: string;
+  x: number; y: number; w: number; h: number;
+}
+
+export interface Architecture {
+  canvas: { w: number; h: number };
+  bands: ArchBand[];
+  nodes: ArchNode[];
+  edges: { from: string; to: string; label: string }[];
+}
+
+// ------------------------------------------------------- knowledge upload ----
+/** A row in the registry. `status` is the gate: only `approved` with n_chunks > 0 is
+ *  reachable by a chat question — everything else is invisible to search. */
+export interface KnowledgeDoc {
+  doc_id: string;
+  file_name: string;
+  status: "pending_review" | "approved" | "rejected";
+  source: string;
+  uploaded_by?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  ingest_error?: string | null;
+  content_kind?: string | null;
+  /** Which corpus. `app_help` rows are the generated user guide, owned by `make guide` —
+   *  they are not documents a steward uploaded and must not read as review backlog. */
+  doc_kind?: string;
+  size_bytes?: number | null;
+  n_chunks?: number | null;
+  pii_found?: boolean | null;
+  pii_kinds?: string | null;
+  registered_at: string;
+}
+
+export interface KnowledgeList {
+  documents: KnowledgeDoc[];
+  usage: { docs: number; chunks: number; max_docs: number; max_chunks: number };
+  can_review: boolean;
+  accepted_types: string[];
+  max_bytes: Record<string, number>;
+}
+
+/** What the reviewer reads before approving. Text is PII-redacted server-side. */
+export interface KnowledgePreview {
+  doc_id: string;
+  file_name: string;
+  pages: number;
+  n_chunks: number;
+  total_chars: number;
+  strategy: string;
+  extracted_text: string;
+  truncated: boolean;
+  pii_kinds: Record<string, number>;
+  /** A PDF with no text layer chunks into noise — the reviewer has to be told. */
+  empty_extraction: boolean;
+  status: string;
+  uploaded_by?: string | null;
+}
+
+export interface UploadResult {
+  doc_id: string; file_name: string; status: string; kind: string;
+  size_bytes: number; sha256: string; warnings: string[]; uploaded_by: string;
+  next: string;
+}
+
+export interface ApproveResult {
+  doc_id: string; file_name: string; n_chunks: number; pages: number;
+  pii_kinds: string[]; status: string; reviewed_by: string;
+  searchable: boolean; note: string; already?: boolean;
 }
 
 /** Every lane at once — the swim-lane board reads this in one call. */
@@ -315,7 +460,10 @@ export const api = {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ username, password }),
     });
-    if (!res.ok) throw new ApiError(res.status, await detail(res), "/auth/token");
+    if (!res.ok) {
+      const raw = await rawDetail(res);
+      throw new ApiError(res.status, flatten(raw) || res.statusText, "/auth/token", raw);
+    }
     const body = await res.json();
     session.save(body.access_token);
     return { username: body.username, role: body.role, full_name: body.full_name };
@@ -324,6 +472,9 @@ export const api = {
   logout: () => session.clear(),
 
   health: () => get<Health>("/health"),
+
+  /** The system's own architecture, with every counter measured at request time. */
+  architecture: () => get<Architecture>("/architecture"),
   stages: () => get<Stages>("/stages"),
 
   patterns: () => get<Pattern[]>("/patterns"),
@@ -357,10 +508,29 @@ export const api = {
   reject: (actionId: string) =>
     post<{ to: string }>(`/queue/${actionId}/reject`, undefined),
 
+  // Knowledge upload + review. Nothing uploaded here is searchable until a data steward
+  // approves it — the server keeps that gate; these calls only drive it.
+  knowledgeDocs: (status?: string) => get<KnowledgeList>("/knowledge/documents", { status }),
+  knowledgeUpload: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return postForm<UploadResult>("/knowledge/upload", form);
+  },
+  knowledgePreview: (docId: string) =>
+    get<KnowledgePreview>(`/knowledge/documents/${docId}/preview`),
+  knowledgeApprove: (docId: string) =>
+    post<ApproveResult>(`/knowledge/documents/${docId}/approve`, undefined),
+  knowledgeReject: (docId: string, note: string) =>
+    post<{ doc_id: string; status: string }>(
+      `/knowledge/documents/${docId}/reject?note=${encodeURIComponent(note)}`, undefined),
+  knowledgeRemove: (docId: string) =>
+    del<{ doc_id: string; chunks_removed: number }>(`/knowledge/documents/${docId}`),
+
   chat: (body: { question: string; pattern?: string; date?: string; agentic?: boolean }) =>
     post<ChatAnswer>("/chat", body),
-  history: (pattern: string, user?: string) =>
-    get<HistoryTurn[]>("/chat/history", { pattern, user }),
+  // No `user` param: whose "cleared" cutoff to apply is taken from the bearer token
+  // server-side. It used to be a query string, which is a client-asserted identity.
+  history: (pattern: string) => get<HistoryTurn[]>("/chat/history", { pattern }),
   /** Hides the transcript for THIS user. Deletes nothing — the rows and the traces
    *  behind them are the audit record. */
   clearChat: (pattern: string) =>

@@ -23,6 +23,7 @@ import httpx
 
 from ..config import load_config
 from ..core import faithfulness as FA
+from ..core import help_topics as HELP
 from . import analyst as AZ
 from . import llm
 from . import tools as T
@@ -76,6 +77,14 @@ DATA_MARKERS = ("this pattern", "our", "here", "shown", "screen", "table", "peri
 
 def detect_intent(question: str) -> str:
     q = question.lower()
+    # `help` is checked BEFORE the keyword table, not added to it, because the table is
+    # first-match-wins on substrings and several app questions collide with domain
+    # intents: "how do I approve a change?" contains "approval" (→ submit) and "where do
+    # I see the lineage view?" contains "lineage". `is_help_question` requires an app noun
+    # before it will claim anything, so "how is VRR calculated" still routes to `lineage`
+    # and gets the real derivation rather than a page about a screen.
+    if HELP.is_help_question(question):
+        return "help"
     for name, keys in INTENTS:
         if any(k in q for k in keys):
             return name
@@ -247,6 +256,59 @@ def general_answer(question: str, use_llm: bool = True) -> dict:
                      "grounded": bool(context)}}
 
 
+def _help_answer(question: str) -> dict:
+    """How to use the application. Written text, returned verbatim — no model runs.
+
+    The deterministic table (`core/help_topics.py`) is tried first and answers the
+    questions that actually get asked. Only when it matches nothing does this fall
+    through to retrieval over an ingested user guide (`doc_kind='app_help'`), and even
+    then the model is summarising real document text rather than recalling what a
+    petroleum workbench probably looks like.
+
+    Why this is not simply RAG: a fabricated FIGURE is caught by `core.faithfulness`, but
+    fabricated UI — "click Export, top right" — makes no numeric claim and passes every
+    check this project has. The reader then hunts for a button that does not exist. So
+    the primary path is written, not generated.
+    """
+    hit = HELP.answer(question)
+    if hit:
+        text = hit["body"]
+        if hit["related"]:
+            text += "\n\n_Related: " + " · ".join(r["title"] for r in hit["related"]) + "_"
+        return {"intent": "help", "text": text,
+                "data": {"topic": hit["topic"], "view": hit["view"],
+                         "source": "core/help_topics.py"},
+                "meta": {"llm": False, "gate": "n/a (written answer, nothing generated)"}}
+
+    # Long tail: search only the ingested app guide, never the reservoir corpus. Without
+    # that filter "how do I approve a change?" competes with the injection-change
+    # PROCEDURE for the same top-k, and the reservoir document usually wins on similarity
+    # — answering a question about a button with a paragraph about valve limits.
+    hits = T.search_knowledge(question, k=4, doc_kind="app_help")
+    found = (hits.get("hits") or []) if hits.get("ok") else []
+    if not found:
+        topics = "\n".join(f"- {t['title']}" for t in HELP.index())
+        return {"intent": "help",
+                "text": ("I don't have a written answer for that one. Here is what I can "
+                         f"explain about this workbench:\n\n{topics}\n\n"
+                         "For questions about your field data — a pattern, a period, a "
+                         "number — just ask directly and the deterministic tools answer "
+                         "from Postgres."),
+                "data": {"topic": None, "matched": False},
+                "meta": {"llm": False, "gate": "n/a (no topic matched)"}}
+
+    sources = "\n\n".join(f"[{h['file_name']} p.{h['page']}]\n{h['text']}" for h in found)
+    if not llm.available():
+        return {"intent": "help", "text": sources, "data": hits,
+                "meta": {"llm": False, "retrieved": len(found)}}
+    msg = llm.chat([
+        {"role": "system", "content": KNOWLEDGE_SYSTEM},
+        {"role": "user", "content": f"{question}\n\nUSER GUIDE EXCERPTS\n{sources}"}])
+    return {"intent": "help", "text": (msg.get("content") or "").strip(), "data": hits,
+            "meta": {"llm": True, "model": llm.pick_model(), "retrieved": len(found),
+                     "gate": "grounded in the ingested user guide"}}
+
+
 @tracing.trace("chat.respond", span_type="AGENT")
 def respond(question: str, *, pattern: str | None = None, date: str | None = None,
             use_llm: bool = True, agentic: bool = False) -> dict:
@@ -263,6 +325,13 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
     named_date = resolve_date(question, None)
     pid = named_pattern or pattern
     when = named_date or date
+
+    # First, ahead of `is_general` and of every data intent: an app question must never be
+    # answered as if it were a question about the reservoir. "How do I use the Report
+    # view?" starts with "how do" and would otherwise reach `general_answer`, which hands
+    # it to the model as a reservoir-engineering question.
+    if intent == "help":
+        return _help_answer(question)
 
     if intent in ("explain", "recommend") and is_general(question, bool(named_pattern),
                                                          bool(named_date)):

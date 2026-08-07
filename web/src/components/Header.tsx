@@ -9,7 +9,9 @@
  * a whole session once, silently, because the indicator was a grey line buried in the
  * sidebar. Now it is red and next to your name until MLflow comes back.
  */
+import { useState } from "react";
 import type { Health, Identity } from "../api";
+import { SCALES, type ScaleId, readScale, saveScale } from "../ui-scale";
 
 export function Header({ me, health, patternName, period, onSignIn, onSignOut }: {
   me: Identity | null;
@@ -83,6 +85,8 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         {llm?.available ? llm.model : "no model"}
       </span>
 
+      <ScalePicker />
+
       {/* ---------------------------------------------------------- identity */}
       <div className="ml-1 shrink-0 border-l border-surface-border pl-2 sm:pl-4">
         {me ? (
@@ -112,6 +116,37 @@ export function Header({ me, health, patternName, period, onSignIn, onSignOut }:
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * How big the app is, for this reader.
+ *
+ * A native `<select>` rather than a custom menu: it gets keyboard operation, the global
+ * `:focus-visible` ring and the platform's own touch handling for free, and this is a
+ * setting you change once — not a control worth a bespoke widget.
+ *
+ * It exists because the default is 68%, which puts body text near 8px. That is what this
+ * workbench is read at, but it is well under the 11px floor the July accessibility pass
+ * set, so the way back has to be one click away rather than a rebuild.
+ */
+function ScalePicker() {
+  const [scale, setScale] = useState<ScaleId>(() => readScale());
+  return (
+    <label className="hidden shrink-0 items-center gap-1.5 md:flex"
+           title="Scales the whole interface — type, padding and spacing together">
+      <span className="text-micro text-content-muted">size</span>
+      <select
+        value={scale}
+        onChange={(e) => { const v = e.target.value as ScaleId; setScale(v); saveScale(v); }}
+        className="rounded-md border border-surface-border bg-surface-raised px-1.5 py-1
+                   text-micro text-content-secondary"
+      >
+        {(Object.keys(SCALES) as ScaleId[]).map((id) => (
+          <option key={id} value={id}>{SCALES[id].label}</option>
+        ))}
+      </select>
+    </label>
   );
 }
 

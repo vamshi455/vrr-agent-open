@@ -5,7 +5,30 @@
 /* Tabular figures everywhere a number appears — a VRR column that jitters between rows
    is harder to scan, and this app is mostly columns of numbers. */
 @layer base {
-  html { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  /*
+   * ONE lever for the size of the entire application.
+   *
+   * Every size in the app is already in rem — the six type tokens in tailwind.config.js
+   * and Tailwind's own spacing scale — so the root font-size scales type, padding, gaps
+   * and card widths together. That is exactly what browser zoom does, which is why
+   * setting this to 68% reproduces the appearance of viewing the old build at 68% zoom,
+   * at 100% zoom. Editing the six tokens instead would have shrunk the text while
+   * leaving the padding, and the app would have read as sparse rather than dense.
+   *
+   * `--ui-scale` is written to the element by `web/src/ui-scale.ts` from localStorage.
+   * The 68% default is a deliberate choice by the operator of this workbench; the
+   * fallback here is what applies before that script runs, so first paint is not a
+   * full-size flash.
+   *
+   * NOTE, stated because it is a real trade and not a detail: 68% puts `micro` at ~7.5px
+   * and `body` at ~8.2px, well under the 11px floor the 2026-07-31 audit set and under
+   * WCAG-comfortable body text. The Compact/Default/Large control in the header exists
+   * so that is recoverable per reader rather than baked in for everyone.
+   */
+  html {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: var(--ui-scale, 68%);
+  }
   /* Set on <html> as well as <body>, so an over-scroll bounce shows the page ground
      and not a strip of white. */
   html, body { background: theme(colors.surface.base); color: theme(colors.content.primary); }

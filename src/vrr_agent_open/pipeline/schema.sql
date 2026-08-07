@@ -253,6 +253,40 @@ CREATE TABLE IF NOT EXISTS vrr_agent.knowledge_registry (
   doc_id text PRIMARY KEY, file_name text, status text DEFAULT 'pending_review',
   reviewed_by text, pii_found boolean, pii_kinds text, n_chunks int, registered_at timestamptz DEFAULT now()
 );
+-- Browser uploads (api/routes_knowledge.py) need provenance the folder-drop flow never
+-- did: WHO sent the file, what it weighed, and what it hashed to. Added as ALTERs rather
+-- than folded into the CREATE above so a database seeded before uploads existed gains
+-- them on the next `psql -f schema.sql` instead of needing a rebuild.
+ALTER TABLE vrr_agent.knowledge_registry
+  ADD COLUMN IF NOT EXISTS source        text DEFAULT 'folder',  -- folder | upload
+  ADD COLUMN IF NOT EXISTS uploaded_by   text,                   -- token subject
+  ADD COLUMN IF NOT EXISTS stored_name   text,                   -- sanitised name on disk
+  ADD COLUMN IF NOT EXISTS content_kind  text,                   -- pdf|text|html|docx|csv
+  ADD COLUMN IF NOT EXISTS size_bytes    bigint,
+  ADD COLUMN IF NOT EXISTS sha256        text,
+  ADD COLUMN IF NOT EXISTS reviewed_at   timestamptz,
+  ADD COLUMN IF NOT EXISTS review_note   text,                   -- why it was rejected
+  ADD COLUMN IF NOT EXISTS ingest_error  text;                   -- why embedding failed
+-- Content-addressed dedupe. Re-uploading the same bytes under a new name must not create
+-- a second copy of every chunk in the vector index, where it would crowd out other
+-- documents in the top-k. Partial, because the folder-drop rows have no hash.
+-- Which CORPUS a document belongs to. Not cosmetic: the top-k a question gets back is
+-- finite, so "how do I approve a change?" would otherwise compete with the injection
+-- change PROCEDURE for the same four slots — and the reservoir document wins on
+-- similarity, answering a question about a button with a paragraph about valve limits.
+-- Two corpora in one table, never mixed in one search.
+ALTER TABLE vrr_agent.knowledge_registry
+  ADD COLUMN IF NOT EXISTS doc_kind text NOT NULL DEFAULT 'reservoir';
+ALTER TABLE vrr_agent.reservoir_knowledge
+  ADD COLUMN IF NOT EXISTS doc_kind text NOT NULL DEFAULT 'reservoir';
+CREATE INDEX IF NOT EXISTS reservoir_knowledge_kind_idx
+  ON vrr_agent.reservoir_knowledge (doc_kind);
+CREATE UNIQUE INDEX IF NOT EXISTS knowledge_registry_sha256_idx
+  ON vrr_agent.knowledge_registry (sha256) WHERE sha256 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS knowledge_registry_status_idx
+  ON vrr_agent.knowledge_registry (status, registered_at DESC);
+CREATE INDEX IF NOT EXISTS reservoir_knowledge_doc_idx
+  ON vrr_agent.reservoir_knowledge (doc_id);
 -- Analyst chat transcript. One row per question+answer turn asked in the chat drawer
 -- drawer, scoped by pattern and SHARED across users: opening a pattern shows what anyone
 -- already asked about it, so a review is not restarted from zero. Written only by the app

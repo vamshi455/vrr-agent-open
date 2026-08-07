@@ -112,7 +112,9 @@ def test_health_never_raises_when_everything_is_down(client, monkeypatch):
     body = client.get("/api/health").json()
 
     assert body["llm"]["available"] is False
-    assert body["knowledge"] == {"docs": 0, "chunks": 0}
+    # `pending_review` joined the payload so the workbench can badge the review queue;
+    # it degrades to 0 with the rest when the database is unreachable.
+    assert body["knowledge"] == {"docs": 0, "chunks": 0, "pending_review": 0}
 
 
 # ------------------------------------------------------- approval guardrails ----
@@ -247,7 +249,14 @@ def test_clearing_chat_hides_it_without_deleting_anything(client, monkeypatch):
 
 
 def test_history_respects_that_users_personal_cutoff(client, monkeypatch):
-    """One user clearing must not blank the shared transcript for everyone else."""
+    """One user clearing must not blank the shared transcript for everyone else.
+
+    The cutoff is now keyed on the BEARER TOKEN, not a `?user=` query parameter — whose
+    view to render is a fact about the caller, so it comes from the signature. The
+    endpoint stays readable signed-out, and an anonymous read is simply unfiltered.
+    """
+    from vrr_agent_open.api.auth import create_access_token
+
     seen = {}
     monkeypatch.setattr(RC, "execute", lambda sql, p: None)
     monkeypatch.setattr(RC, "query", lambda sql, p=None: [{"cleared_at": "2026-07-30"}])
@@ -255,11 +264,13 @@ def test_history_respects_that_users_personal_cutoff(client, monkeypatch):
     monkeypatch.setattr(RC.HIST, "recent",
                         lambda p, limit, since: seen.update(since=since) or [])
 
-    client.get("/api/chat/history", params={"pattern": PATTERN, "user": "analyst.demo"})
+    tok, _ = create_access_token("analyst.demo", "analyst")
+    client.get("/api/chat/history", params={"pattern": PATTERN},
+               headers={"Authorization": f"Bearer {tok}"})
     assert seen["since"] == "2026-07-30"                     # filtered for this user
 
     client.get("/api/chat/history", params={"pattern": PATTERN})
-    assert seen["since"] is None                             # unfiltered for everyone else
+    assert seen["since"] is None                             # unfiltered when signed out
 
 
 def test_chat_answer_carries_its_trace_id(client, monkeypatch):

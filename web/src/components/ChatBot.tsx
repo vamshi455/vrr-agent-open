@@ -36,6 +36,9 @@ interface Turn {
   traceUrl?: string | null; traced?: boolean; pending?: boolean;
 }
 
+/** Mirrors `api/schemas.py::ChatRequest.question` — kept equal to it on purpose. */
+const QUESTION_MAX = 2000;
+
 export function ChatBot({ patternId, patternName, period, user, vsTarget, signedIn,
                           onNeedSignIn, llmUp }: Props) {
   const [open, setOpen] = useState(false);
@@ -48,7 +51,7 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
 
   useEffect(() => {
     if (!patternId) return;
-    api.history(patternId, user || undefined)
+    api.history(patternId)
       .then((rows: HistoryTurn[]) => setTurns(rows.map(fromHistory)))
       .catch(() => setTurns([]));
   }, [patternId, user]);
@@ -93,6 +96,8 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
       console.error(e);
     }
   }
+
+  const nearLimit = input.length > QUESTION_MAX * 0.8;
 
   const quick: [string, string][] = [
     ["Why this VRR?", `Why is ${patternName}'s VRR ${vsTarget} in ${monthName(period)}?`],
@@ -188,15 +193,29 @@ export function ChatBot({ patternId, patternName, period, user, vsTarget, signed
         {turns.map((t, i) => <TurnBlock key={i} turn={t} />)}
       </div>
 
+      {/*
+        The length cap mirrors `ChatRequest.question` (max_length=2000) server-side. Both
+        exist on purpose: this one turns a 422 into a counter the user can see BEFORE
+        sending, and the server one is the actual control — the input is a hint, and any
+        HTTP client bypasses it.
+      */}
       <form className="shrink-0 border-t border-surface-divider p-2"
             onSubmit={(e) => { e.preventDefault(); ask(input); }}>
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => setInput(e.target.value.slice(0, QUESTION_MAX))}
+          maxLength={QUESTION_MAX}
+          aria-label={`Ask about ${patternName}`}
+          aria-describedby={nearLimit ? "chat-len" : undefined}
           placeholder={signedIn ? `Ask about ${patternName}…` : "Sign in to ask…"}
           disabled={busy}
           className="w-full rounded-lg border border-surface-border px-3 py-2 text-body placeholder:text-content-muted focus:border-brand-500 disabled:bg-surface-raised"
         />
+        {nearLimit && (
+          <p id="chat-len" className="mt-1 px-1 text-right text-micro tabular-nums text-content-muted">
+            {input.length} / {QUESTION_MAX}
+          </p>
+        )}
       </form>
     </div>
   );

@@ -688,19 +688,25 @@ def submit_for_approval(pattern: str, date: str, *, draft: dict,
 
 
 @tracing.retriever_span("SEARCH_KNOWLEDGE")
-def search_knowledge(query: str, k: int = 3) -> dict:
+def search_knowledge(query: str, k: int = 3, doc_kind: str | None = "reservoir") -> dict:
     """pgvector search over ingested reservoir docs. Needs a local embedding model.
 
     Traced as a RETRIEVER span carrying `mlflow.entities.Document`s, which is what makes
     the retrieval scorers (groundedness / relevance / sufficiency) able to score this
     system at all — a TOOL span is invisible to them.
+
+    `doc_kind` defaults to `reservoir`, so the LLM-facing tool spec below — and every
+    existing caller — searches the reservoir corpus only. The application user guide
+    lives in the same table under `app_help` and is reached from `chat._help_answer`,
+    never from the model's own tool loop: the model has no reason to answer a question
+    about the reservoir out of a page describing a button.
     """
     try:
         from ..config import load_config
         from ..pipeline.knowledge_ingest import search
         # `hits` may legitimately be empty: chunks below the similarity floor are noise,
         # and reporting the floor lets the caller say WHY it is abstaining.
-        return {"ok": True, "hits": search(query, k),
+        return {"ok": True, "hits": search(query, k, doc_kind=doc_kind),
                 "min_score": load_config().retrieval_min_score}
     except Exception as e:                     # no Ollama / no ingested docs
         return {"ok": False, "reason": f"knowledge search unavailable: {e}"}

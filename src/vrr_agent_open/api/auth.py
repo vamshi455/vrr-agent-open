@@ -165,4 +165,24 @@ def require_role(*allowed: str):
     return guard
 
 
+def optional_user(token: Annotated[str | None, Depends(oauth2_scheme)]) -> dict | None:
+    """The identity behind this request, or None — never a 401.
+
+    For endpoints that stay readable signed-out but must still not accept a
+    client-ASSERTED identity. The chat transcript is the case: it is public to read, and
+    whose "cleared" cutoff to apply is a fact about the caller, so it has to come from a
+    signature rather than a query parameter. A bad token here reads as anonymous instead
+    of erroring, because the endpoint works fine without one.
+    """
+    if not token:
+        return None
+    try:
+        claims = decode_token(token)
+    except HTTPException:
+        return None
+    username, role = claims.get("sub"), claims.get("role")
+    return {"username": username, "role": role, "claims": claims} if username else None
+
+
 CurrentUser = Annotated[dict, Depends(current_user)]
+OptionalUser = Annotated[dict | None, Depends(optional_user)]

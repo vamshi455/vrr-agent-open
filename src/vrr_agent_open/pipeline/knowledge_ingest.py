@@ -78,6 +78,112 @@ def register_new() -> int:
     return n
 
 
+def _embed_one(cur, doc_id: str, fname: str, strategy: str,
+               doc_kind: str = "reservoir") -> dict:
+    """Load → chunk → redact → embed → INSERT one registered document.
+
+    Factored out of `ingest_approved` so the API can embed a SINGLE document the instant
+    a reviewer approves it (`api/routes_knowledge.py`), instead of the browser waiting on
+    a sweep of every approved-but-not-ingested row. Same code either way — an upload and
+    a folder drop must not be able to produce different chunks from the same bytes.
+
+    Takes a live cursor rather than opening its own connection, so approving and embedding
+    commit together: a row marked approved whose chunks failed to write is a document the
+    reviewer believes is searchable and is not.
+    """
+    from . import document_loaders as DL
+    from . import text_splitters as TS
+
+    pages = DL.load_file(os.path.join(UPLOAD_DIR, fname))
+    for p in pages:                           # undo PDF layout wrapping before split
+        p.page_content = normalize_page(p.page_content)
+    kinds, seq = set(), 0
+    for piece in TS.split_documents(pages, strategy=strategy):
+        clean, k = kn.redact_pii(piece.page_content)      # PII never reaches the DB
+        kinds.update(k)
+        pageno = int(piece.metadata.get("page", 1))
+        cur.execute(
+            "INSERT INTO vrr_agent.reservoir_knowledge "
+            "(chunk_id, doc_id, file_name, page, chunk_seq, text, pii_redacted, "
+            " embedding, doc_kind) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (chunk_id) DO UPDATE "
+            "SET text=EXCLUDED.text, embedding=EXCLUDED.embedding, "
+            "    doc_kind=EXCLUDED.doc_kind",
+            (f"{doc_id}:{pageno}:{seq}", doc_id, fname, pageno, seq,
+             clean, bool(k), embed(clean), doc_kind))
+        seq += 1
+    cur.execute("UPDATE vrr_agent.knowledge_registry SET n_chunks=%s, "
+                "pii_found=%s, pii_kinds=%s WHERE doc_id=%s",
+                (seq, bool(kinds), ",".join(sorted(kinds)) or None, doc_id))
+    return {"doc_id": doc_id, "file_name": fname, "n_chunks": seq,
+            "pages": len(pages), "pii_kinds": sorted(kinds), "doc_kind": doc_kind}
+
+
+def ingest_document(doc_id: str, file_name: str, strategy: str | None = None,
+                    doc_kind: str = "reservoir") -> dict:
+    """Embed exactly one document, now. The approval endpoint's whole back half."""
+    strategy = strategy or os.environ.get("VRR_CHUNK_STRATEGY", "recursive")
+    with _conn() as c, c.cursor() as cur:
+        out = _embed_one(cur, doc_id, file_name, strategy, doc_kind)
+        c.commit()
+    return out
+
+
+def delete_document(doc_id: str) -> int:
+    """Drop a document's chunks out of the vector index. Returns rows removed.
+
+    The registry row is kept by the caller: what was ingested and by whom is a record,
+    and deleting the evidence along with the data is the failure mode `chat_history`
+    already avoids by making "clear" a per-user cutoff.
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM vrr_agent.reservoir_knowledge WHERE doc_id=%s", (doc_id,))
+        n = cur.rowcount
+        cur.execute("UPDATE vrr_agent.knowledge_registry SET n_chunks=NULL WHERE doc_id=%s",
+                    (doc_id,))
+        c.commit()
+    return n
+
+
+def preview_document(file_name: str, strategy: str | None = None,
+                     max_chars: int = 1200) -> dict:
+    """What a reviewer sees BEFORE approving: real extracted text, and the PII in it.
+
+    Runs the actual loader and splitter — not a guess — because the question a reviewer
+    is answering is "would embedding this be useful and safe", and a PDF that extracts to
+    nothing (a scan with no OCR layer) looks identical to a good one until you parse it.
+    Embeds NOTHING; no model is called and no row is written.
+    """
+    from . import document_loaders as DL
+    from . import text_splitters as TS
+
+    strategy = strategy or os.environ.get("VRR_CHUNK_STRATEGY", "recursive")
+    pages = DL.load_file(os.path.join(UPLOAD_DIR, file_name))
+    for p in pages:
+        p.page_content = normalize_page(p.page_content)
+    pieces = TS.split_documents(pages, strategy=strategy)
+    full = "\n\n".join(p.page_content for p in pages)
+    hits = kn.detect_pii(full)
+    counts: dict[str, int] = {}
+    for h in hits:
+        counts[h["kind"]] = counts.get(h["kind"], 0) + 1
+    # The preview is redacted too. A reviewer does not need to READ the credential to
+    # decide the document contains one, and an unredacted preview would put PII in a
+    # browser and an access log after this pipeline went to the trouble of keeping it
+    # out of the database.
+    redacted, _ = kn.redact_pii(full[:max_chars])
+    return {
+        "file_name": file_name, "pages": len(pages), "n_chunks": len(pieces),
+        "total_chars": len(full), "strategy": strategy,
+        "extracted_text": redacted,
+        "truncated": len(full) > max_chars,
+        "pii_kinds": counts,
+        # A PDF whose pages carry no text layer produces chunks of nothing, which embed
+        # into noise and pollute every top-k. Say so rather than let it through quietly.
+        "empty_extraction": len(full.strip()) < 200,
+    }
+
+
 def ingest_approved(strategy: str | None = None) -> int:
     """Step 3 — load + chunk + PII-redact + embed every approved-but-not-ingested doc.
 
@@ -86,40 +192,21 @@ def ingest_approved(strategy: str | None = None) -> int:
     that measured best — see `make chunks`). `VRR_CHUNK_STRATEGY` overrides it; changing
     it means re-ingesting, since chunk boundaries are baked into the stored embeddings.
     """
-    from . import document_loaders as DL
-    from . import text_splitters as TS
-
     strategy = strategy or os.environ.get("VRR_CHUNK_STRATEGY", "recursive")
     done = 0
     with _conn() as c, c.cursor() as cur:
-        cur.execute("SELECT doc_id, file_name FROM vrr_agent.knowledge_registry "
+        cur.execute("SELECT doc_id, file_name, coalesce(doc_kind, 'reservoir') "
+                    "FROM vrr_agent.knowledge_registry "
                     "WHERE status='approved' AND n_chunks IS NULL")
-        for doc_id, fname in cur.fetchall():
-            pages = DL.load_file(os.path.join(UPLOAD_DIR, fname))
-            for p in pages:                       # undo PDF layout wrapping before split
-                p.page_content = normalize_page(p.page_content)
-            kinds, seq = set(), 0
-            for piece in TS.split_documents(pages, strategy=strategy):
-                clean, k = kn.redact_pii(piece.page_content)  # PII never reaches the DB
-                kinds.update(k)
-                pageno = int(piece.metadata.get("page", 1))
-                cur.execute(
-                    "INSERT INTO vrr_agent.reservoir_knowledge "
-                    "(chunk_id, doc_id, file_name, page, chunk_seq, text, pii_redacted, embedding) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (chunk_id) DO UPDATE "
-                    "SET text=EXCLUDED.text, embedding=EXCLUDED.embedding",
-                    (f"{doc_id}:{pageno}:{seq}", doc_id, fname, pageno, seq,
-                     clean, bool(k), embed(clean)))
-                seq += 1
-            cur.execute("UPDATE vrr_agent.knowledge_registry SET n_chunks=%s, "
-                        "pii_found=%s, pii_kinds=%s WHERE doc_id=%s",
-                        (seq, bool(kinds), ",".join(sorted(kinds)) or None, doc_id))
+        for doc_id, fname, kind in cur.fetchall():
+            _embed_one(cur, doc_id, fname, strategy, kind)
             done += 1
         c.commit()
     return done
 
 
-def search(query: str, k: int = 5, min_score: float | None = None) -> list[dict]:
+def search(query: str, k: int = 5, min_score: float | None = None,
+           doc_kind: str | None = "reservoir") -> list[dict]:
     """Step 4 — the SEARCH_KNOWLEDGE tool: cosine nearest chunks (pgvector `<=>`).
 
     Filtered by a similarity FLOOR, not just top-k. Without one, `LIMIT k` always
@@ -130,17 +217,26 @@ def search(query: str, k: int = 5, min_score: float | None = None) -> list[dict]
 
     `VRR_RETRIEVAL_MIN_SCORE` tunes it (default 0.35); pass `min_score=0` to see the
     raw ranking, which is what `retrieval_check` wants when comparing chunkers.
+
+    `doc_kind` picks the CORPUS, and defaults to `reservoir` so every existing caller
+    keeps searching exactly what it always searched. The two corpora share a table but
+    are never searched together: top-k is a fixed budget, so letting a user-guide page
+    about the Approvals screen compete with the injection-change procedure means one of
+    them loses a slot it needed. `doc_kind=None` searches everything, which is what
+    `retrieval_check` wants when it is measuring the chunker rather than answering.
     """
     floor = CFG.retrieval_min_score if min_score is None else min_score
     vec = str(embed(query))              # embed ONCE, reuse for score + ordering
     with _conn() as c:
         with c.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
-                "SELECT file_name, page, text, 1 - (embedding <=> %(v)s::vector) AS score "
+                "SELECT file_name, page, text, doc_kind, "
+                "       1 - (embedding <=> %(v)s::vector) AS score "
                 "FROM vrr_agent.reservoir_knowledge "
                 "WHERE 1 - (embedding <=> %(v)s::vector) >= %(floor)s "
+                "  AND (%(kind)s::text IS NULL OR doc_kind = %(kind)s::text) "
                 "ORDER BY embedding <=> %(v)s::vector LIMIT %(k)s",
-                {"v": vec, "k": k, "floor": floor})
+                {"v": vec, "k": k, "floor": floor, "kind": doc_kind})
             return cur.fetchall()
 
 

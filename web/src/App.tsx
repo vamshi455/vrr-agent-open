@@ -22,6 +22,8 @@ import { Header } from "./components/Header";
 import { Login } from "./components/Login";
 import { Banner, Spinner } from "./components/ui";
 import { ApprovalView } from "./views/ApprovalView";
+import { ArchitectureView } from "./views/ArchitectureView";
+import { KnowledgeView } from "./views/KnowledgeView";
 import { LineageView } from "./views/LineageView";
 import { PortfolioView } from "./views/PortfolioView";
 import { ReportView } from "./views/ReportView";
@@ -31,6 +33,10 @@ const VIEWS = [
   { id: "report", label: "Report", hint: "what moved, and what to do" },
   { id: "lineage", label: "Lineage & audit", hint: "do I believe this number" },
   { id: "approval", label: "Approvals", hint: "who signs it off" },
+  { id: "knowledge", label: "Knowledge", hint: "what the agent may read" },
+  // Last in the rail because it is the only view that is about the software rather than
+  // the field — read once to understand the machine, not every morning.
+  { id: "architecture", label: "Architecture", hint: "what runs when you ask" },
 ] as const;
 type ViewId = (typeof VIEWS)[number]["id"];
 
@@ -135,6 +141,13 @@ export default function App() {
                 }`}
               >
                 {v.label}
+                {/* A document sitting unapproved answers nothing, and no other screen
+                    would say so — the badge is the only place that fact surfaces. */}
+                {v.id === "knowledge" && (health?.knowledge.pending_review ?? 0) > 0 && (
+                  <span className="ml-1.5 rounded-full bg-suspect-soft px-1.5 text-micro font-medium text-suspect">
+                    {health?.knowledge.pending_review}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -183,6 +196,17 @@ export default function App() {
           {view === "report" && <ReportView {...shared} />}
           {view === "lineage" && <LineageView {...shared} />}
           {view === "approval" && <ApprovalView role={me?.role ?? ""} />}
+          {view === "architecture" && <ArchitectureView />}
+          {view === "knowledge" && (
+            <KnowledgeView
+              role={me?.role ?? ""}
+              signedIn={!!me}
+              onNeedSignIn={() => setLoginOpen(true)}
+              // Approving embeds, so the sidebar's doc/chunk counts are stale the moment
+              // it returns. Refresh health rather than wait out the 30s poll.
+              onChanged={() => api.health().then(setHealth).catch(() => {})}
+            />
+          )}
         </main>
       </div>
 

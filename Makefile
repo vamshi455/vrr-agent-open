@@ -4,7 +4,7 @@
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
 .PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users diagram api web web-build app share agent \
-	stream-init stream-produce \
+	stream-init stream-produce guide \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
@@ -17,7 +17,11 @@ install:       ## editable install + dev deps
 	pip install -e ".[dev]"
 
 test:          ## run the pure off-DB unit tests (no stack needed)
-	pytest -q
+	# `$(PYTHON) -m pytest`, never a bare `pytest`: a bare one resolves through PATH to
+	# conda base or homebrew 3.14 here, neither of which has psycopg, so every test that
+	# imports the pipeline fails at collection. That is CLAUDE.md operating rule 1, and
+	# this target was breaking it.
+	$(PYTHON) -m pytest -q
 
 seed:          ## generate + load synthetic VRR data into Postgres
 	$(PYTHON) -m vrr_agent_open.pipeline.seed
@@ -117,6 +121,9 @@ stream-produce: ## simulate production volumes (rate=days/sec days=N transport=d
 	$(PYTHON) -m vrr_agent_open.streaming.producer \
 	  $(if $(rate),--rate $(rate),) $(if $(days),--days $(days),) \
 	  $(if $(transport),--transport $(transport),)
+
+guide:         ## generate the in-app user guide from core/help_topics.py + ingest it
+	$(PYTHON) scripts/build_app_guide.py
 
 agent:         ## run one agent question from the CLI
 	$(PYTHON) -m vrr_agent_open.agent.graph "Why is UNITY's VRR high in April 2026?"
