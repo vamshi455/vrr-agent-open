@@ -475,21 +475,22 @@ not in a prompt.
 ### Topology — five nodes, nine edges
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'arial, helvetica, sans-serif','fontSize':'14px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':18,'nodeSpacing':64,'rankSpacing':72,'curve':'basis','useMaxWidth':true}}}%%
 flowchart TB
-    START(["START"]) --> PLAN
-    PLAN["plan — the ONLY node that may speak<br/>picks from 16 tool specs, or answers"]
-    PLAN -->|"tool_calls and steps &lt; max_steps"| TOOLS
-    PLAN -->|"no tool_calls — it answered"| GATE
-    PLAN -->|"tool_calls and steps ≥ max_steps"| BUDGET
-    TOOLS["tools — executes over Postgres<br/>harvests every number into facts"]
+    START["invoke run()"] --> PLAN
+    PLAN["plan: only node that may speak"]
+    PLAN -->|"tool_calls, under budget"| TOOLS
+    PLAN -->|"answered"| GATE
+    PLAN -->|"over budget"| BUDGET
+    TOOLS["tools: Postgres, harvest facts"]
     TOOLS --> PLAN
-    GATE["gate — core.faithfulness<br/>drivers · directions · numbers"]
-    GATE -->|"rejected, first attempt, LLM up"| REPAIR
-    GATE -->|"passed, already repaired, or no LLM"| FIN(["END"])
-    REPAIR["repair — one rewrite, violation fed back<br/>TOOLS WITHHELD"]
+    GATE["gate: core.faithfulness"]
+    GATE -->|"rejected, first try"| REPAIR
+    GATE -->|"passed or already repaired"| FIN
+    REPAIR["repair: one rewrite, tools withheld"]
     REPAIR --> GATE
-    BUDGET["budget — step budget exhausted"] --> FIN
+    BUDGET["budget: step budget exhausted"] --> FIN
+    FIN["return answer"]
 
     classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
     classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
@@ -542,32 +543,37 @@ class State(TypedDict, total=False):
 ```
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':36,'rankSpacing':40,'curve':'basis','useMaxWidth':true}}}%%
-flowchart TB
-    subgraph add ["Append-only — operator.add. A node returns only what it adds."]
-        A1["messages — chat turns + tool results"]
-        A2["trace — {tool, args, result} per call"]
-        A3["facts — every number a tool returned"]
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'arial, helvetica, sans-serif','fontSize':'14px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':18,'nodeSpacing':36,'rankSpacing':48,'curve':'basis','useMaxWidth':true}}}%%
+flowchart LR
+    subgraph add ["append-only lists"]
+        direction TB
+        A1["messages: chat turns + tool results"]
+        A2["trace: tool, args, result per call"]
+        A3["facts: every number a tool returned"]
     end
-    subgraph ow ["Last write wins"]
-        B1["last_decompose — newest VRR_DECOMPOSE"]
-        B2["answer / gate — what the analyst sees"]
-        B3["steps / repaired — loop control"]
+    subgraph ow ["last write wins"]
+        direction TB
+        B1["last_decompose: newest decompose result"]
+        B2["answer / gate: what the analyst sees"]
+        B3["steps / repaired: loop control"]
     end
-    subgraph sd ["Seeded at invoke — nodes do not write these"]
-        C1["max_steps — default 6"]
-        C2["model — optional override"]
+    subgraph sd ["seeded at invoke"]
+        direction TB
+        C1["max_steps: default 6"]
+        C2["model: optional override"]
     end
-    PLAN["plan"] -->|"messages[+], steps"| add
-    PLAN --> ow
-    TOOLS["tools"] -->|"messages[+], trace[+], facts[+], last_decompose"| add
-    TOOLS --> ow
-    GATE["gate"] -->|"answer, gate"| ow
-    REPAIR["repair"] -->|"messages[+], repaired=true"| add
-    REPAIR --> ow
-    BUDGET["budget"] -->|"answer, gate"| ow
-    CK["InMemorySaver — keyed by thread_id"] -.-> add
-    CK -.-> ow
+```
+
+Who writes which keys (a node returns a **patch**, never the whole `State`):
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'arial, helvetica, sans-serif','fontSize':'14px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':18,'nodeSpacing':48,'rankSpacing':48,'curve':'basis','useMaxWidth':true}}}%%
+flowchart LR
+    PLAN["plan"] --> P1["messages, steps"]
+    TOOLS["tools"] --> T1["messages, trace, facts, last_decompose"]
+    GATE["gate"] --> G1["answer, gate"]
+    REPAIR["repair"] --> R1["messages, repaired"]
+    BUDGET["budget"] --> U1["answer, gate"]
 
     classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
     classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
@@ -575,7 +581,6 @@ flowchart TB
     class PLAN,REPAIR data;
     class TOOLS ok;
     class GATE warn;
-    class CK data;
 ```
 
 The graph is compiled once per process (`GRAPH = build()`). `InMemorySaver` stores the full `State` under `thread_id`. A fresh `run()` seeds `messages` / `steps` / `max_steps` / `model` / `repaired` and empty `trace` / `facts` / `last_decompose`. Passing the same `thread_id` **does not** reset those three evidence fields — the next question is appended onto the existing trail. `recursion_limit` is `max_steps * 3 + 10`, because one model turn can fan out to tools and back.
