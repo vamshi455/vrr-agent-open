@@ -468,23 +468,26 @@ not in a prompt.
 
 ## 5. The agent — a real LangGraph `StateGraph`
 
-`agent/graph.py`. Compiled once per process; `build().get_graph().draw_mermaid()`
-regenerates this diagram from the code.
+`agent/graph.py`. Compiled once per process with an `InMemorySaver` checkpointer;
+`build().get_graph().draw_mermaid()` regenerates the topology from the code.
+`tests/test_graph.py` pins the edges with the model and Postgres stubbed.
+
+### Topology — five nodes, nine edges
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart TB
     START(["START"]) --> PLAN
-    PLAN["plan — 🤖 the ONLY node that may speak<br/>picks from 15 tool specs, or answers"]
-    PLAN -->|"tool_calls present"| TOOLS
-    PLAN -->|"no tool_calls, it answered"| GATE
-    PLAN -->|"steps == max_steps"| BUDGET
-    TOOLS["tools — ⚙️ executes over Postgres<br/>harvests every number into facts"]
+    PLAN["plan — the ONLY node that may speak<br/>picks from 16 tool specs, or answers"]
+    PLAN -->|"tool_calls and steps &lt; max_steps"| TOOLS
+    PLAN -->|"no tool_calls — it answered"| GATE
+    PLAN -->|"tool_calls and steps ≥ max_steps"| BUDGET
+    TOOLS["tools — executes over Postgres<br/>harvests every number into facts"]
     TOOLS --> PLAN
-    GATE["gate — 🛡️ core.faithfulness<br/>drivers · directions · numbers"]
-    GATE -->|"rejected, first attempt"| REPAIR
-    GATE -->|"passed, or already repaired"| FIN(["END"])
-    REPAIR["repair — 🤖 one rewrite, violation fed back<br/>TOOLS WITHHELD"]
+    GATE["gate — core.faithfulness<br/>drivers · directions · numbers"]
+    GATE -->|"rejected, first attempt, LLM up"| REPAIR
+    GATE -->|"passed, already repaired, or no LLM"| FIN(["END"])
+    REPAIR["repair — one rewrite, violation fed back<br/>TOOLS WITHHELD"]
     REPAIR --> GATE
     BUDGET["budget — step budget exhausted"] --> FIN
 
@@ -496,7 +499,33 @@ flowchart TB
     class GATE warn;
 ```
 
-### The state schema is the contract
+| Node | Function | Speaks? | State it writes |
+|---|---|---|---|
+| `plan` | the model picks a tool from the 16 specs, or answers | yes | `messages` (+assistant), `steps` |
+| `tools` | runs them over Postgres; harvests every returned number into `facts` | no | `messages` (+tool), `trace`, `facts`, `last_decompose` |
+| `gate` | `core.faithfulness` — drivers, directions, tool-sourced numbers. A rejected answer is replaced by the computed attribution before anything leaves | no | `answer`, `gate` |
+| `repair` | one rewrite with the violation fed back; **tools withheld** so the model cannot fish for new numbers | yes | `messages` (+assistant), `repaired=True` |
+| `budget` | terminal when `max_steps` model turns are spent still calling tools | no | `answer`, `gate` |
+
+Two **conditional** edges decide the route (`after_plan`, `after_gate`); everything else is unconditional.
+
+| From | To | When |
+|---|---|---|
+| `START` | `plan` | always |
+| `plan` | `tools` | `after_plan`: last message has `tool_calls` and `steps < max_steps` |
+| `plan` | `gate` | `after_plan`: the model answered (no `tool_calls`) |
+| `plan` | `budget` | `after_plan`: `tool_calls` but `steps >= max_steps` |
+| `tools` | `plan` | always — the loop |
+| `gate` | `END` | `after_gate`: passed, already repaired, or no LLM to repair with |
+| `gate` | `repair` | `after_gate`: rejected, first attempt, LLM available |
+| `repair` | `gate` | always — repaired text is gated too |
+| `budget` | `END` | always |
+
+The one path that does **not** go through `gate` is the budget: `plan → budget → END`. Every *answer* still goes through `gate`, including the rewrite (`repair → gate`, never `repair → END`).
+
+### State management — reducers, patches, checkpointer
+
+`State` is a `TypedDict`. LangGraph merges each node's **patch** into the current state; a node never returns the whole object. The `Annotated[..., operator.add]` fields are the append-only evidence trail: a node returns only what it **adds**, so nothing already computed can be overwritten by a later step.
 
 ```python
 class State(TypedDict, total=False):
@@ -504,17 +533,59 @@ class State(TypedDict, total=False):
     trace:          Annotated[list[dict],  operator.add]   # append-only  {tool, args, result}
     facts:          Annotated[list[float], operator.add]   # append-only  numbers the answer may cite
     last_decompose: dict | None      # newest VRR_DECOMPOSE — what the gate checks against
-    answer: str;  gate: dict;  steps: int;  max_steps: int;  repaired: bool
+    answer: str
+    gate: dict
+    steps: int                       # plan turns taken
+    max_steps: int                   # seeded at invoke
+    repaired: bool
+    model: str | None                # seeded at invoke
 ```
 
-The reducers are the point: a node returns only what it **adds**, so no step can
-silently drop evidence the gate is about to check. Five properties fall out:
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':36,'rankSpacing':40,'curve':'basis','useMaxWidth':true}}}%%
+flowchart TB
+    subgraph add ["Append-only — operator.add. A node returns only what it adds."]
+        A1["messages — chat turns + tool results"]
+        A2["trace — {tool, args, result} per call"]
+        A3["facts — every number a tool returned"]
+    end
+    subgraph ow ["Last write wins"]
+        B1["last_decompose — newest VRR_DECOMPOSE"]
+        B2["answer / gate — what the analyst sees"]
+        B3["steps / repaired — loop control"]
+    end
+    subgraph sd ["Seeded at invoke — nodes do not write these"]
+        C1["max_steps — default 6"]
+        C2["model — optional override"]
+    end
+    PLAN["plan"] -->|"messages[+], steps"| add
+    PLAN --> ow
+    TOOLS["tools"] -->|"messages[+], trace[+], facts[+], last_decompose"| add
+    TOOLS --> ow
+    GATE["gate"] -->|"answer, gate"| ow
+    REPAIR["repair"] -->|"messages[+], repaired=true"| add
+    REPAIR --> ow
+    BUDGET["budget"] -->|"answer, gate"| ow
+    CK["InMemorySaver — keyed by thread_id"] -.-> add
+    CK -.-> ow
+
+    classDef data fill:#e3edf6,stroke:#2d6b91,stroke-width:1px,color:#12374d;
+    classDef ok fill:#dff3e6,stroke:#2f855a,stroke-width:1px,color:#14532d;
+    classDef warn fill:#fdf2d9,stroke:#b7791f,stroke-width:1px,color:#713f12;
+    class PLAN,REPAIR data;
+    class TOOLS ok;
+    class GATE warn;
+    class CK data;
+```
+
+The graph is compiled once per process (`GRAPH = build()`). `InMemorySaver` stores the full `State` under `thread_id`. A fresh `run()` seeds `messages` / `steps` / `max_steps` / `model` / `repaired` and empty `trace` / `facts` / `last_decompose`. Passing the same `thread_id` **does not** reset those three evidence fields — the next question is appended onto the existing trail. `recursion_limit` is `max_steps * 3 + 10`, because one model turn can fan out to tools and back.
 
 | Property | Mechanism |
 |---|---|
-| Evidence cannot be dropped | `operator.add` reducers on `messages`/`trace`/`facts` |
-| The gate cannot be bypassed | every path `plan → END` routes through the `gate` node |
-| Repaired text is gated too | `repair → gate`, never `repair → END` |
+| Evidence cannot be dropped | `operator.add` reducers on `messages` / `trace` / `facts` |
+| An *answer* cannot skip the gate | every path that produces narration goes `plan → gate`; `repair → gate`, never `repair → END` |
+| The budget is the exception | `plan → budget → END` when the model keeps calling tools past `max_steps` |
+| Repaired text is gated too | `repair → gate` |
 | Runs resume | compiled with `InMemorySaver`; `run(..., thread_id=…)` continues |
 | Runaway loops stop | `max_steps` model turns + a `recursion_limit` backstop |
 
