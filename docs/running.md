@@ -26,7 +26,9 @@ pytest -q
 # Start 3 background containers (needs Docker Desktop running):
 #   postgres     — PostgreSQL 16 + pgvector (VRR data + knowledge vector index)
 #   unitycatalog — Unity Catalog OSS (governance catalog) on :8080
-#   mlflow       — MLflow tracking server on :5000
+#   mlflow       — Machine Learning flow (MLflow) tracking server on host :5001
+#                  (container still listens on 5000; published 5001:5000 because
+#                  macOS AirPlay Receiver holds 5000)
 # First run auto-applies schema.sql (creates vrr_raw / vrr_curated / vrr_agent schemas).
 docker compose up -d
 docker compose ps                 # confirm all three are "running"/healthy
@@ -49,10 +51,11 @@ make seed
 make build
 
 # See what the agent did: MLflow traces (tools called, LLM calls, gate verdict).
-# NOTE macOS: port 5000 is taken by AirPlay Receiver, so run the server on 5001 and
-# point the agent at it (compose users can keep :5000).
-#   mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
+# Host port is always 5001 — compose publishes 5001:5000, and a local `mlflow server`
+# should bind 5001 too, because macOS AirPlay Receiver holds 5000 and answers 403.
 #   export MLFLOW_TRACKING_URI=http://localhost:5001
+#   # if you are not using compose:
+#   mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
 # Then open http://localhost:5001 → experiment "vrr-agent-open" → Traces.
 # Tracing is optional: with no server reachable the agent runs identically, untraced.
 
@@ -76,7 +79,7 @@ make app          # build web/ then serve it from FastAPI                       
 ollama pull llama3.1              # narrator model (one-time)
 ollama pull nomic-embed-text     # 768-dim embeddings for knowledge search
 make agent                       # one question through the LangGraph tool loop + gate
-                                 # traces stream to MLflow (:5000)
+                                 # traces stream to MLflow (:5001)
 
 # (Optional) Ingest a PDF into the vector DB (pgvector):
 mkdir -p knowledge_uploads && cp your_report.pdf knowledge_uploads/
@@ -96,5 +99,10 @@ docker compose down -v     # stop + DELETE data volumes (fresh start next time)
 - `make <target>` just runs the commented commands in the [Makefile](../Makefile).
 - The `agent/graph.py` LLM+gate wiring and `agent/tools.py` `vrr_decompose` SQL are
   `TODO`-marked skeletons; the deterministic core and the PDF→pgvector path are complete.
-- Ports in use: 5432 (Postgres), 8080 (Unity Catalog), 5000 (MLflow), 8000 (FastAPI),
+- Ports in use: 5432 (Postgres), 8080 (Unity Catalog), 5001 (MLflow on the host;
+  the compose container still listens on 5000), 8000 (FastAPI),
   5173 (Vite dev server, only during `make web`).
+- Compose path that has been *documented*, not run end-to-end in this change:
+  `make up` (or `docker compose up -d`) → `make seed` → `make queue` → `make app`.
+  Set `MLFLOW_TRACKING_URI=http://localhost:5001`. Off-database unit tests run in
+  GitHub Actions on pull requests and pushes to `main` (`.github/workflows/test.yml`).

@@ -36,18 +36,20 @@ Two words you will keep seeing:
 | For | You need | Check |
 |---|---|---|
 | Answering questions at all | Postgres with seeded data | `make seed` has been run |
-| Recording the work | MLflow server | `http://localhost:5000` opens |
+| Recording the work | MLflow server | `http://localhost:5001` opens |
 | Natural-language phrasing | Ollama | `ollama list` shows a model |
 | The 3 LLM judges | Ollama + two env vars | see Step 5b |
 
 ```bash
-docker compose up -d          # postgres + unitycatalog + mlflow
+docker compose up -d          # postgres + unitycatalog + mlflow (host :5001)
 make seed                     # synthetic field data (deterministic, ~5 s)
-export MLFLOW_TRACKING_URI=http://localhost:5000
+export MLFLOW_TRACKING_URI=http://localhost:5001
 ```
 
-> **macOS gotcha:** AirPlay Receiver squats on port 5000. If you run MLflow yourself
-> rather than via compose, use 5001 and export `MLFLOW_TRACKING_URI=http://localhost:5001`.
+> **macOS gotcha:** AirPlay Receiver squats on port 5000. Compose publishes Machine
+> Learning flow (MLflow) as `5001:5000` (container still listens on 5000). A local
+> `mlflow server` should bind 5001 as well. Always export
+> `MLFLOW_TRACKING_URI=http://localhost:5001`.
 
 You can do a meaningful evaluation with *no* LLM at all — see Step 5c. Nothing here costs
 money.
@@ -237,7 +239,7 @@ failed that check.
 
 ## Step 6 — look at it in the UI
 
-Open `http://localhost:5000` → experiment **`vrr-agent-open`**:
+Open `http://localhost:5001` → experiment **`vrr-agent-open`**:
 
 * **Traces** tab — click one. You get the span tree: which tools ran, in what order, with
   their real inputs and outputs. This is where you find out *why* a check failed, and it

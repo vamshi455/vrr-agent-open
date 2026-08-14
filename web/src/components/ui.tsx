@@ -171,6 +171,8 @@ const INTENT_LABEL: Record<string, string> = {
   data_quality: "Data-quality check",
   knowledge: "From your documents",
   general: "General knowledge — not your data",
+  help: "How to use this workbench",
+  status: "Runtime status — live probes",
 };
 
 /**

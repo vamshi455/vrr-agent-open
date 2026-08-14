@@ -50,8 +50,9 @@ def build_adjustment_row(queue_row: dict, recommendation: dict | None,
     """Assemble an `adjustment_history` row from an executed queue draft.
 
     Pulls the predicted numbers from the recommendation payload so the learning loop
-    (`10_outcome_writeback`) can later compare predicted vs actual ΔVRR. `actual_post_vrr`
-    is left None — it's filled when the field reports the realized VRR.
+    (`pipeline/outcome_writeback.py`, `make writeback`) can later compare predicted vs
+    actual ΔVRR. `actual_post_vrr` is left None — the write-back job fills it from the
+    next monthly curated VRR after this period.
     """
     rec = recommendation or {}
     changes = rec.get("injector_changes") or []

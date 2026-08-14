@@ -54,18 +54,27 @@ JUDGE_BASE_URL = os.environ.get("OPENAI_API_BASE") or _DEFAULT_BASE_URL
 if _LOCAL_JUDGE and not os.environ.get("OPENAI_API_KEY"):
     os.environ["OPENAI_API_KEY"] = "ollama-local"
 
+# ``{{ trace }}`` puts ``make_judge`` in MLflow's USE_CASE_AGENTIC_JUDGE mode: the model
+# is not handed the answer and must tool-call through the span tree (``list_spans``,
+# ``get_span``, ``search_trace_regex``). That walk defeated both qwen2.5:7b and
+# gpt-4o-mini (iteration limit of 30). ``provenance_cited`` and ``decision_complete``
+# only need the FINAL ANSWER, so they use ``{{ outputs }}`` (standard non-agentic mode).
+# ``grounded_in_documents`` needs the retriever span and stays on ``{{ trace }}``.
+# Numbers themselves are already checked by the deterministic scorers; these two judge
+# presentation. Where a judge and a deterministic scorer disagree, the deterministic
+# scorer is right.
+
 PROVENANCE_CITED = """
-Examine {{ trace }}. Rate the final response on whether it attributes its figures to
+Examine {{ outputs }}. Rate the final response on whether it attributes its figures to
 their source: the table they came from (vrr_curated.pattern_vrr,
 vrr_curated.completion_contrib, or a vrr_raw input table), the PVT lookup method wherever
 a reservoir volume is quoted, and the run_id or period where one applies.
 Return true if every quantitative claim can be traced to a source named in the response.
-Return false if figures are stated with no indication of origin, or if a cited source does
-not appear anywhere in the trace's tool spans.
+Return false if figures are stated with no indication of origin.
 """.strip()
 
 DECISION_COMPLETE = """
-Examine {{ trace }}. If the final response proposes an injection change, return true only
+Examine {{ outputs }}. If the final response proposes an injection change, return true only
 if it states all of: the named injector completions affected, the change in surface rate
 with its percentage, whether a safety limit clamped it, the expected post-change VRR, the
 dominant driver taken from the decomposition, any precedent from history, a confidence

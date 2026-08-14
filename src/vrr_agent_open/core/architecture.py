@@ -133,9 +133,9 @@ NODES: tuple[NodeSpec, ...] = (
     NodeSpec(
         "router", "agent", 1, 0, "Intent router",
         what="Keyword scoring picks the path — lineage, audit, knowledge, help, "
-             "portfolio and the rest. Deterministic by default; the model only drives "
-             "the loop when agentic is asked for.",
-        files=("agent/chat.py",),
+             "status, portfolio and the rest. Deterministic by default; the model only "
+             "drives the loop when agentic is asked for.",
+        files=("agent/chat.py", "core/status.py"),
         keys=("intents",), template="{} intents",
     ),
     NodeSpec(
@@ -228,8 +228,9 @@ NODES: tuple[NodeSpec, ...] = (
     NodeSpec(
         "executed", "approval", 4, 0, "executed",
         what="Written to adjustment_history with the authenticated subject as "
-             "approved_by. The outcome write-back that closes the loop is not built yet.",
-        files=("api/routes_approvals.py",),
+             "approved_by. After the next monthly build, make writeback fills "
+             "actual_post_vrr and EMA-updates the response factor (ρ) into pattern_memory.",
+        files=("api/routes_approvals.py", "pipeline/outcome_writeback.py"),
         keys=("queue_executed",), template="{} card(s)",
         guardrail="Each hop requires its own role; the chain cannot be skipped.",
     ),
@@ -251,9 +252,10 @@ NODES: tuple[NodeSpec, ...] = (
     ),
     NodeSpec(
         "judges", "llmops", 2, 0, "LLM judges",
-        what="Three judges that read the trace. Their verdicts contradict themselves on "
-             "the same case and are treated as UNMEASURED — shown here rather than "
-             "hidden, because a scoreboard with a broken column is worse than a gap.",
+        what="Two judges read the final answer; grounded_in_documents still walks the "
+             "retriever span. Verdicts are treated as UNMEASURED until the next eval "
+             "run — shown here rather than hidden, because a scoreboard with a broken "
+             "column is worse than a gap.",
         files=("evaluation/",),
         keys=("judges_state",), template="{}",
         guardrail="Not a quality bar. See CLAUDE.md before quoting these.",

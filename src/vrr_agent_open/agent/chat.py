@@ -24,8 +24,10 @@ import httpx
 from ..config import load_config
 from ..core import faithfulness as FA
 from ..core import help_topics as HELP
+from ..core import status as STATUS
 from . import analyst as AZ
 from . import llm
+from . import runtime as RT
 from . import tools as T
 from . import tracing
 from ..prompts import (GENERAL_SYSTEM, KNOWLEDGE_SYSTEM, NARRATOR_SYSTEM)
@@ -62,6 +64,13 @@ INTENTS = (
                  "drift", "what happened")),
 )
 
+# Checked BEFORE the keyword table, same reason as each other: first-match-wins on
+# substrings. `status` must beat `lineage` ("trace" is inside "tracing") and `help`
+# ("which model is the chat using?" is a live-probe question, not a screen tour).
+# Counted by the architecture diagram via `PRE_TABLE_INTENTS`, so adding one here
+# updates the box rather than leaving it a stale "10".
+PRE_TABLE_INTENTS = ("status", "help")
+
 
 # Conceptual questions ("what is VRR?", "why does over-injection matter?") that are
 # about the DOMAIN rather than this field's numbers. Answered from the model's own
@@ -77,12 +86,15 @@ DATA_MARKERS = ("this pattern", "our", "here", "shown", "screen", "table", "peri
 
 def detect_intent(question: str) -> str:
     q = question.lower()
-    # `help` is checked BEFORE the keyword table, not added to it, because the table is
-    # first-match-wins on substrings and several app questions collide with domain
-    # intents: "how do I approve a change?" contains "approval" (→ submit) and "where do
-    # I see the lineage view?" contains "lineage". `is_help_question` requires an app noun
-    # before it will claim anything, so "how is VRR calculated" still routes to `lineage`
-    # and gets the real derivation rather than a page about a screen.
+    # `status` then `help`, both BEFORE the keyword table, not added to it. The table is
+    # first-match-wins on substrings: "are you tracing?" contains "trace" (→ lineage),
+    # "how do I approve a change?" contains "approval" (→ submit), "where do I see the
+    # lineage view?" contains "lineage". `status` beats `help` so "which model is the
+    # chat using?" is a live probe rather than a screen tour. `is_help_question` still
+    # requires an app noun, so "how is VRR calculated" routes to `lineage` and gets the
+    # real derivation rather than a page about a screen.
+    if STATUS.is_status_question(question):
+        return "status"
     if HELP.is_help_question(question):
         return "help"
     for name, keys in INTENTS:
@@ -309,6 +321,19 @@ def _help_answer(question: str) -> dict:
                      "gate": "grounded in the ingested user guide"}}
 
 
+def _status_answer() -> dict:
+    """Connectivity, model, tracing, pattern count. Live probes, no model.
+
+    Facts come from `agent.runtime.probe` — the same snapshot `/api/health` wraps —
+    and `core.status.format_status` only turns that dict into sentences. The model
+    never sees the question: a 7B guessing whether Ollama is up is the failure mode
+    this path exists to close.
+    """
+    snap = RT.probe()
+    return {"intent": "status", "text": STATUS.format_status(snap), "data": snap,
+            "meta": {"llm": False, "gate": "n/a (live probes, nothing generated)"}}
+
+
 @tracing.trace("chat.respond", span_type="AGENT")
 def respond(question: str, *, pattern: str | None = None, date: str | None = None,
             use_llm: bool = True, agentic: bool = False) -> dict:
@@ -321,17 +346,17 @@ def respond(question: str, *, pattern: str | None = None, date: str | None = Non
     more likely to be caught fabricating, in which case the computed answer is shown.
     """
     intent = detect_intent(question)
+    # Status and help do not need a pattern resolved, and status in particular is what
+    # you ask when Postgres may be down — `list_patterns` must not run first.
+    if intent == "status":
+        return _status_answer()
+    if intent == "help":
+        return _help_answer(question)
+
     named_pattern = resolve_pattern(question, None)
     named_date = resolve_date(question, None)
     pid = named_pattern or pattern
     when = named_date or date
-
-    # First, ahead of `is_general` and of every data intent: an app question must never be
-    # answered as if it were a question about the reservoir. "How do I use the Report
-    # view?" starts with "how do" and would otherwise reach `general_answer`, which hands
-    # it to the model as a reservoir-engineering question.
-    if intent == "help":
-        return _help_answer(question)
 
     if intent in ("explain", "recommend") and is_general(question, bool(named_pattern),
                                                          bool(named_date)):

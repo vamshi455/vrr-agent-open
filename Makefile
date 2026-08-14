@@ -3,11 +3,14 @@
 # Override explicitly with `make <target> PYTHON=...` to use a different interpreter.
 PYTHON ?= $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
-.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue register users diagram api web web-build app share agent \
+.PHONY: up down install test seed build audit knowledge loaders chunks floor llm-check queue writeback register users diagram api web web-build app share agent \
 	stream-init stream-produce guide \
         agent-model prompts traces eval judges lint
 
 up:            ## start the local OSS stack (postgres+pgvector, unity catalog, mlflow)
+	# Host maps MLflow 5001→container 5000 (macOS AirPlay holds 5000). Point
+	# MLFLOW_TRACKING_URI at http://localhost:5001. Starts containers only —
+	# seed / queue / app are separate; that path is not claimed verified here.
 	docker compose up -d
 
 down:          ## stop the stack
@@ -49,6 +52,9 @@ llm-check:     ## can each provider do a completion AND tool calling? (add p=ope
 
 queue:         ## run the anomaly → action_queue job (drafts for human approval)
 	$(PYTHON) -m vrr_agent_open.pipeline.anomaly_to_queue
+
+writeback:     ## fill actual_post_vrr from the next monthly VRR and EMA-update ρ
+	$(PYTHON) -m vrr_agent_open.pipeline.outcome_writeback
 
 agent-model:   ## log + register the agent as an MLflow model (alias: candidate)
 	$(PYTHON) scripts/register_model.py

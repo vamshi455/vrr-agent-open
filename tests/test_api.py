@@ -106,8 +106,11 @@ def test_health_never_raises_when_everything_is_down(client, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("connection refused")
 
-    monkeypatch.setattr(API.LLM, "available", boom)
-    monkeypatch.setattr(API, "query", boom)
+    from vrr_agent_open.agent import runtime as RT
+
+    monkeypatch.setattr(RT.LLM, "available", boom)
+    monkeypatch.setattr(RT, "_rows", boom)
+    monkeypatch.setattr(RT.T, "list_patterns", boom)
 
     body = client.get("/api/health").json()
 

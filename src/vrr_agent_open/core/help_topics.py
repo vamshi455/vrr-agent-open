@@ -285,6 +285,11 @@ and period you have selected, so "why is this high?" resolves without you repeat
 Every answer carries its provenance line and a **trace ↗** link to the full span tree in
 MLflow: which tools ran, what the model said, what the faithfulness gate decided.
 
+**Runtime questions are probed, not generated.** "Are you connected to an LLM?",
+"which model?", "how many patterns?", "are you tracing?" hit the `status` intent and
+quote the same live probes `/api/health` uses. A model guessing its own configuration
+is a failure mode that path exists to close.
+
 **It abstains.** Ask about something the ingested documents do not cover and it says "I
 don't know" *without calling the model at all*, rather than handing you four
 confident-looking excerpts that do not answer the question.

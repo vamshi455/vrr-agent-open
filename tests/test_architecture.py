@@ -155,6 +155,14 @@ def test_the_approval_band_matches_the_real_chain():
     assert drawn == list(STAGES), f"board drawn as {drawn}, chain is {list(STAGES)}"
 
 
+def test_executed_box_points_at_the_writeback_job():
+    """The diagram used to say the ρ loop was not built. If the job moves, this box
+    must move with it rather than keep advertising a closed loop that is not there."""
+    spec = next(n for n in ARCH.NODES if n.id == "executed")
+    assert "pipeline/outcome_writeback.py" in spec.files
+    assert "not built" not in spec.what.lower()
+
+
 def test_every_approval_stage_has_a_count_key():
     for stage in ("draft", "analyst", "rm", "site", "executed"):
         spec = next(n for n in ARCH.NODES if n.id == stage)

@@ -138,9 +138,9 @@ def collect_facts() -> dict[str, Any]:
     # Registry lengths rather than literals: rename or remove a tool and the box follows.
     facts["tools"] = len(TOOLS.TOOL_SPECS)
     try:
-        from ..agent.chat import INTENTS
+        from ..agent.chat import INTENTS, PRE_TABLE_INTENTS
 
-        facts["intents"] = len(INTENTS)
+        facts["intents"] = len(INTENTS) + len(PRE_TABLE_INTENTS)
     except Exception:
         pass
 

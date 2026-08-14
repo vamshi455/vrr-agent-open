@@ -25,13 +25,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from ..agent import llm as LLM
-from ..agent import tracing as TRACING
+from ..agent import runtime as RT
 from ..config import load_config
 from . import auth as AUTH
 from . import (routes_approvals, routes_architecture, routes_auth, routes_chat,
                routes_knowledge, routes_patterns)
 from . import share as SHARE
-from .db import query
 
 CFG = load_config()
 
@@ -85,34 +84,27 @@ def health() -> dict:
     """What the sidebar shows: is a model up, is tracing on, is anything ingested.
 
     Never raises — a workbench that will not load because MLflow is down would be a
-    worse failure than the one it is reporting.
+    worse failure than the one it is reporting. Connectivity facts come from
+    `agent.runtime.probe` so `/api/health` and the chat `status` intent cannot disagree.
     """
-    llm_up = False
-    model = None
     try:
-        llm_up = LLM.available()
-        model = LLM.pick_model() if llm_up else None
+        snap = RT.probe()
     except Exception:
-        pass
+        snap = {}
 
-    knowledge = {"docs": 0, "chunks": 0, "pending_review": 0}
+    pg = dict(snap.get("postgres") or {})
+    pg.setdefault("monthly_rows", 0)
+    pg["host"] = CFG.pg_dsn.split("@")[-1]
+    tr = dict(snap.get("tracing") or {})
+    tr.setdefault("enabled", False)
+    tr["uri"] = CFG.mlflow_uri
+    llm_info = dict(snap.get("llm") or {})
+    llm_info.setdefault("available", False)
+    llm_info.setdefault("model", None)
     try:
-        knowledge = query("SELECT count(DISTINCT doc_id) AS docs, count(*) AS chunks "
-                          "FROM vrr_agent.reservoir_knowledge")[0]
-        # Surfaced so the workbench can badge the review queue: a document sitting
-        # unapproved is invisible to every search, and nothing else in the UI would say so.
-        knowledge["pending_review"] = query(
-            "SELECT count(*) AS n FROM vrr_agent.knowledge_registry "
-            "WHERE status = 'pending_review'")[0]["n"]
+        llm_info.setdefault("provider", LLM.provider())
     except Exception:
-        pass
-
-    patterns_loaded = 0
-    try:
-        patterns_loaded = query("SELECT count(*) AS n FROM vrr_curated.pattern_vrr "
-                                "WHERE grain='monthly'")[0]["n"]
-    except Exception:
-        pass
+        llm_info.setdefault("provider", None)
 
     # Redacted when the app is publicly reachable: the Postgres host and the MLflow URI
     # are sidebar detail on a laptop and reconnaissance from a stranger's browser.
@@ -120,11 +112,11 @@ def health() -> dict:
         "auth": {"required_for": ["writes", "chat"], "scheme": "OAuth2 password → JWT bearer",
                  "token_ttl_minutes": AUTH.TOKEN_TTL_MINUTES,
                  "ephemeral_secret": AUTH.SECRET_IS_EPHEMERAL},
-        "llm": {"available": llm_up, "model": model, "provider": LLM.provider()},
-        "tracing": {"enabled": TRACING.enabled(), "uri": CFG.mlflow_uri},
-        "postgres": {"host": CFG.pg_dsn.split("@")[-1], "monthly_rows": patterns_loaded},
-        "knowledge": knowledge,
-        "retrieval_min_score": CFG.retrieval_min_score,
+        "llm": llm_info,
+        "tracing": tr,
+        "postgres": pg,
+        "knowledge": snap.get("knowledge") or {"docs": 0, "chunks": 0, "pending_review": 0},
+        "retrieval_min_score": snap.get("retrieval_min_score", CFG.retrieval_min_score),
     })
 
 

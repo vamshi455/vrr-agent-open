@@ -69,6 +69,10 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
     unrelated text at 0.40-0.56, so the intuitive 0.35 admitted everything and the abstain
     path never fired. `rulebook_unanswerable` in the eval set guards it.
 - ✅ docker-compose + Makefile + pyproject (installable) + docs (design, running, knowledge-flow).
+  GitHub Actions (`.github/workflows/test.yml`) runs the off-database `make test` suite
+  on pull requests and pushes to `main`. Compose publishes Machine Learning flow
+  (MLflow) as `5001:5000` (container still listens on 5000); the compose path itself
+  has not been run end-to-end.
 - ✅ **Agent + workbench done** (see [docs/agent-flow.md](docs/agent-flow.md)):
   `core/decompose.py` (exact LMDI ΔVRR attribution) · `core/faithfulness.py` (gate) ·
   `agent/tools.py` (16 deterministic tools incl. `VRR_LINEAGE`, `VRR_AUDIT` recompute,
@@ -164,8 +168,9 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   pre-commit. First run found 2 routing gaps, truncated tool spans, 2 false-negative
   classes in the gate, and a figure with no tool span behind it — all fixed. 11 cases now,
   incl. `rulebook_unanswerable` (the negative RAG case: the agent must abstain).
-- 🔶 **The 3 LLM judges now RUN, but their verdicts are still not usable** (diagnosed
-  2026-07-31; the previous note here was wrong and sent the hunt in the wrong direction).
+- 🔶 **The 3 LLM judges execute; `provenance_cited` / `decision_complete` now read
+  `{{ outputs }}`, but verdicts have not been re-measured** (rewrite 2026-08-14; plumbing
+  diagnosed 2026-07-31).
   - **They were never executing.** Not "scoring 0.02" — raising, before reaching a model:
     `OPENAI_API_KEY environment variable must be set`. `.env.example` ships
     `OPENAI_API_KEY=` (present, EMPTY) for the optional hosted path; `load_dotenv` puts
@@ -175,44 +180,39 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
     was in the template, so every clone inherited it. Fixed: check the value
     (`if not os.environ.get(...)`), keys commented out in `.env.example`, 4 regression
     tests in `tests/test_judges_config.py`.
-  - **Now they return real verdicts** — one judge, one trace, `False` in 27s with a
-    correct rationale (that answer genuinely cited no table). `make eval` reports all 9
-    scorers instead of silently reporting 6 while claiming 9.
-  - **But the verdicts are noise on qwen2.5:7b.** Over 50 traces / 11 cases the judges
-    contradict themselves on the SAME eval case: `provenance_cited` 6/11,
-    `decision_complete` 4/11, `grounded_in_documents` 2/11. And they are semantically
-    wrong where they are confident — `grounded_in_documents` returns True on
-    `completions_listing` (not a document question at all) and `provenance_cited` returns
-    True on `general_concept` (explicitly "not your data") while returning False on
-    `lineage_derivation`, the most provenance-heavy answer in the set. Means are
-    `provenance_cited` 0.10 · `decision_complete` 0.06 · `grounded_in_documents` 0.02
-    against a deterministic `numbers_grounded` of 0.98 over the same traces — and per the
-    standing rule, the deterministic scorer wins.
-  - **Why**: `{{ trace }}` puts these in MLflow's `USE_CASE_AGENTIC_JUDGE` mode. The judge
-    is NOT handed the answer; it gets tools (`list_spans`, `get_span`, `search_trace_regex`)
-    and must tool-call its way through the trace. That is beyond a local 7B — it mostly
-    fails to retrieve evidence and defaults to False. **Next step is a bigger judge model**
-    (`VRR_JUDGE_MODEL=` a hosted or larger local model), not more prompt tuning.
-    Caveat on the self-contradiction figure: repeated traces of one case are not
-    byte-identical (the narrator varies), so it overstates slightly — but not enough to
-    change the conclusion.
-  - **A bigger model did NOT fix it** (tried 2026-08-01 with a real OpenAI key,
-    `VRR_JUDGE_MODEL=openai:/gpt-4o-mini`). MLflow itself refuses:
-    `Completion iteration limit of 30 exceeded. This usually indicates the model is not
-    powerful enough to effectively analyze the trace.` So the problem is the *design*, not
-    the model size. **The fix is to stop using `{{ trace }}` for two of the three**:
-    `provenance_cited` and `decision_complete` only need to read the FINAL ANSWER, and
-    `{{ outputs }}` puts them in standard (non-agentic) mode where the text is handed
-    straight to the model — cheap, fast, and workable on the local 7B. Only
-    `grounded_in_documents` genuinely needs the retriever span. Not done: it changes what
-    the judges measure, so it is a decision, not a cleanup.
+  - **Then they returned real verdicts that were noise.** One judge, one trace, `False`
+    in 27s with a correct rationale (that answer genuinely cited no table). `make eval`
+    reports all 9 scorers instead of silently reporting 6 while claiming 9. Over 50 traces
+    / 11 cases the judges contradicted themselves on the SAME eval case:
+    `provenance_cited` 6/11, `decision_complete` 4/11, `grounded_in_documents` 2/11. And
+    they were semantically wrong where they were confident — `grounded_in_documents`
+    returns True on `completions_listing` (not a document question at all) and
+    `provenance_cited` returns True on `general_concept` (explicitly "not your data")
+    while returning False on `lineage_derivation`, the most provenance-heavy answer in
+    the set. Means were `provenance_cited` 0.10 · `decision_complete` 0.06 ·
+    `grounded_in_documents` 0.02 against a deterministic `numbers_grounded` of 0.98 over
+    the same traces — and per the standing rule, the deterministic scorer wins.
+  - **Why:** `{{ trace }}` puts a judge in MLflow's `USE_CASE_AGENTIC_JUDGE` mode. The
+    judge is NOT handed the answer; it gets tools (`list_spans`, `get_span`,
+    `search_trace_regex`) and must tool-call its way through the trace. That is beyond a
+    local 7B — it mostly fails to retrieve evidence and defaults to False. A bigger
+    model did NOT fix it (tried 2026-08-01 with a real OpenAI key,
+    `VRR_JUDGE_MODEL=openai:/gpt-4o-mini`). MLflow itself refuses: `Completion iteration
+    limit of 30 exceeded.` The problem is the *design*, not the model size.
+  - **Done (2026-08-14):** `provenance_cited` and `decision_complete` now use
+    `{{ outputs }}` (standard non-agentic mode; the final answer is handed straight to
+    the model). `grounded_in_documents` stays on `{{ trace }}` — it needs the retriever
+    span. Tests in `tests/test_judges_config.py` pin the template split. Re-run
+    `make traces && make eval` before quoting any judge mean; the 0.10 / 0.06 / 0.02
+    numbers above are from the agentic-mode run and are noise.
   - Plumbing fixed alongside: `JUDGE_BASE_URL` was hardcoded to Ollama, but
     `openai:/gpt-4o-mini` and `openai:/qwen2.5:7b` are the same provider to MLflow — a
     hosted judge would have been POSTed to `localhost:11434`. Now applied only for a local
     judge, and a hosted judge gets no invented key (a fake one turns "no credential" into
     a 401).
   - **Treat `provenance_cited` / `decision_complete` / `grounded_in_documents` as
-    UNMEASURED.** The 6 deterministic scorers are the real signal.
+    UNMEASURED until that eval run.** The 6 deterministic scorers are the real signal.
+    Where a judge and a deterministic scorer disagree, the deterministic one is right.
 
 - ✅ **Knowledge upload from the browser, with the human gate intact** (2026-08-02).
   `api/routes_knowledge.py` + `web/src/views/KnowledgeView.tsx` + `core/upload_validation.py`
@@ -275,6 +275,17 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
     nouns, so the exact question this feature exists for routed to `explain`. People
     describe a board in the vocabulary of every other board tool.
 
+- ✅ **A `status` intent, probed not generated** (2026-08-14). `core/status.py` (pure) +
+  `agent/runtime.py` (the same snapshot `/api/health` wraps) + a pre-table check in
+  `agent/chat.py`, copied from `help`. "Are you connected to an LLM?", "which model?",
+  "how many patterns?", "are you tracing?" used to fall through to `explain`, where a
+  7B would guess about its own configuration — a fabricated number is caught by the
+  gate, a fabricated "Ollama is up" is not. The answer quotes provider, model,
+  narrator available/not, tracing on/off, and pattern count; a failed probe is stated
+  as unread, never as zero. `status` is checked before `help` and before the keyword
+  table so "tracing" cannot be stolen by lineage's `"trace"`. Tests pin routing and
+  that the sentence contains the stubbed model name rather than invented UI.
+
 - ✅ **Drag-and-drop on the approval board + one type scale for the whole UI** (2026-08-02).
   Cards lift only when a legal move exists, and exactly one lane accepts the drop — only
   that lane calls `preventDefault` on `dragover`, so the BROWSER shows "no drop" elsewhere
@@ -292,7 +303,7 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
   `web/src/views/ArchitectureView.tsx` over `GET /api/architecture`
   (`api/routes_architecture.py`) and `core/architecture.py` (pure, 43 tests). Five bands —
   ingest · the turn · knowledge · approval chain · LLM ops — 25 clickable boxes, and every
-  figure on them measured when the request lands: row counts, 16 tools, 10 intents, gate
+  figure on them measured when the request lands: row counts, 16 tools, 12 intents, gate
   repairs, chunks split 4 reservoir / 6 help, cards per lane, `3 judge(s) · UNMEASURED`
   stated on the box rather than hidden. **A box whose probe fails renders with no number,
   never a zero** — "no cards in this lane" and "I could not read the queue" are different
@@ -317,6 +328,13 @@ rebuilt on a free local stack. Design + feasibility: [docs/design.md](docs/desig
     pressing Enter in a headless browser, not by inspection.
   - `core/help_topics.py` gained the sixth view so the agent's own description of the app
     stays true; `test_view_names_match_the_actual_nav` covers it.
+
+- ✅ **Outcome write-back closes the ρ loop** (2026-08-14). `pipeline/outcome_writeback.py`
+  (`make writeback`) finds executed `adjustment_history` rows still missing
+  `actual_post_vrr`, copies the next monthly `vrr_curated.pattern_vrr` (earliest
+  `vrr_date` strictly after the adjustment), and EMA-updates the response factor (ρ)
+  via `core.recommend.update_response_factor` into `pattern_memory`. No later curated
+  period is a no-op — ρ does not move. Decision logic is unit-tested off-DB.
 
 - 🔶 **Skeletons with `TODO` markers** (not yet wired):
   - `governance/uc_register.py` — column population from information_schema for lineage
@@ -422,7 +440,7 @@ These cost real time in earlier sessions. Check them before debugging anything e
    up, or a token 401s that worked a minute ago.
 3. **MLflow lives on 5001, never 5000.** macOS AirPlay Receiver holds 5000 and answers
    403; `agent/tracing.py` requires a 200 from `{uri}/health`, so tracing silently stays
-   off. `docker-compose.yml` still publishes `5000:5000` and will not bind on this Mac.
+   off. `docker-compose.yml` publishes `5001:5000` (container still listens on 5000).
 4. **A stale server holds :8000 after a crash.** Kill it by pid from `lsof -t -nP
    -iTCP:8000 -sTCP:LISTEN` before `make app`, rather than guessing which terminal it is in.
 5. **`web/dist` is gitignored**, so a fresh clone must run `make app` or `make web-build`
@@ -510,27 +528,19 @@ permission from UC, then executes against Postgres. Full reasoning in docs/desig
 - All local + free — do NOT introduce cloud/billable resources.
 
 ## Next tasks (pick up here)
-1. **Make the LLM judges usable** — switch `provenance_cited` and `decision_complete`
-   from `{{ trace }}` to `{{ outputs }}` (non-agentic mode). Both only judge the final
-   answer, and agentic trace-walking defeated qwen2.5:7b AND gpt-4o-mini. Leave
-   `grounded_in_documents` on `{{ trace }}`; it needs the retriever span. Then re-run
-   `make traces && make eval` and check self-consistency again — the current numbers are
-   noise, not a quality bar.
-2. **Outcome write-back** — fill `adjustment_history.actual_post_vrr` after the next build
-   and EMA-update ρ (`core.recommend.update_response_factor`) into `pattern_memory`. This
-   is the last open link in the closed loop: the function exists and is unit-tested, the
-   job that feeds it observed outcomes does not.
-3. **A `status` intent** — "are you connected to an LLM?", "which model?", "how many
-   patterns?" still fall through to `explain`. `/api/health` already has the facts; the
-   answer should be deterministic, because a model guessing about its own configuration is
-   a bad failure mode. The `help` intent (2026-08-02) is the pattern to copy — same
-   problem, same shape of fix, and `core/help_topics.py` shows how to keep the written
-   answer pinned to the code by test.
-4. `governance/uc_register.py` — populate columns from information_schema for lineage.
-5. Verify end-to-end on Docker (`docker compose up` → seed → queue → app). Note
-   `docker-compose.yml` publishes MLflow on `5000:5000`, which will not bind on this Mac —
-   change it to `5001:5000` when doing this.
-6. Ingest a REAL (non-synthetic) PDF so the knowledge path is exercised on prose nobody
+1. **Re-measure the rewritten LLM judges** — `provenance_cited` and `decision_complete`
+   now use `{{ outputs }}` (non-agentic); `grounded_in_documents` stays on `{{ trace }}`
+   because it needs the retriever span. Re-run `make traces && make eval` and check
+   self-consistency. The previous means are from agentic trace-walking and are noise, not
+   a quality bar. Where a judge and a deterministic scorer disagree, the deterministic
+   one is right.
+2. `governance/uc_register.py` — populate columns from information_schema for lineage.
+3. Verify end-to-end on Docker (`docker compose up` → seed → queue → app). Host
+   Machine Learning flow (MLflow) is now `5001:5000` (container still listens on 5000)
+   so it can bind on macOS. Off-database unit tests run in GitHub Actions on pull
+   requests and pushes to `main` (`.github/workflows/test.yml`). The compose path
+   itself has not been run end-to-end in this repo.
+4. Ingest a REAL (non-synthetic) PDF so the knowledge path is exercised on prose nobody
    wrote for it; re-run `make floor` afterwards, since the threshold is corpus-dependent.
 
 ## Local machine state worth knowing (2026-08-01)

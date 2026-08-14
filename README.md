@@ -793,7 +793,7 @@ Then the loop closes:
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, system-ui, -apple-system, sans-serif','fontSize':'13px','lineColor':'#64748b','primaryColor':'#eef1f4','primaryTextColor':'#1f2937','primaryBorderColor':'#64748b','secondaryColor':'#e3edf6','tertiaryColor':'#eef1f4'},'flowchart':{'htmlLabels':true,'padding':10,'nodeSpacing':46,'rankSpacing':54,'curve':'basis','useMaxWidth':true},'sequence':{'useMaxWidth':true,'boxMargin':8}}}%%
 flowchart LR
     EX["executed change + predicted ΔVRR"] --> WAIT["next month's build — make build"]
-    WAIT --> ACT["actual post-VRR observed"]
+    WAIT --> ACT["make writeback — actual post-VRR observed"]
     ACT --> EMA["core.recommend.update_response_factor<br/>rho moves toward observed, alpha = 0.3"]
     EMA --> MEM["vrr_agent.pattern_memory — learned rho per pattern"]
     MEM -.->|"calibrates the NEXT recommendation"| NEXT["step 2 of section 6"]
@@ -802,9 +802,10 @@ flowchart LR
     class EMA ok;
 ```
 
-> **Honest status:** the write-back of `actual_post_vrr` and the EMA update are the top
-> open task — `core.recommend.update_response_factor` exists and is unit-tested, but the
-> pipeline job that feeds it observed outcomes is not wired yet.
+`make writeback` (`pipeline/outcome_writeback.py`) is the job that closes this loop:
+it copies the next monthly curated VRR onto `adjustment_history.actual_post_vrr` and
+EMA-updates the response factor (ρ). Re-running is a no-op once the observed VRR is
+filled; a pattern with no later curated period is left alone and ρ does not move.
 
 ---
 
@@ -870,19 +871,19 @@ flowchart TB
 | `rulebook_unanswerable` | **the agent must ABSTAIN** |
 | `general_concept` | theory answered, and labelled "not your data" |
 
-### ⚠️ The judges are not usable yet — stated plainly
+### ⚠️ The judges were rewritten off the trace; verdicts are not yet re-measured
 
-`make_judge(base_url=…)` was pointed at `{ollama}/v1`, but MLflow **POSTs to that URL
-verbatim** instead of appending `/chat/completions`. Every judge died on a silent `404`,
-so `make eval` reported 6 scorers, exited 0, and looked green while `get_scorers()`
-claimed 9. The endpoint is fixed and they now execute — but they score ~0.02 with
-rationales reading *"Not enough information provided"*, meaning the trace content is not
-reaching the judge. Treat `provenance_cited` / `decision_complete` /
-`grounded_in_documents` as **unmeasured**.
+`{{ trace }}` put all three in MLflow's agentic mode: the judge was not handed the
+answer and had to tool-call through the span tree. Neither qwen2.5:7b nor gpt-4o-mini
+could finish that walk (the hosted model hit MLflow's 30-iteration cap).
+`provenance_cited` and `decision_complete` now use `{{ outputs }}` (the final answer
+text, standard non-agentic mode). `grounded_in_documents` still uses `{{ trace }}`
+because it needs the retriever span. Treat all three as **unmeasured** until the next
+`make traces && make eval`.
 
 > **Repo rule:** where a judge and a deterministic scorer disagree, **the deterministic
-> one is right.** `numbers_grounded` scores 0.98 over the same traces the judges score
-> 0.02.
+> one is right.** `numbers_grounded` scores 0.98 over the same traces; the ~0.02 judge
+> means are from the agentic-mode run and are not a quality bar.
 
 > **Evaluation rule:** always `make traces` immediately before `make eval`, and only via
 > the Makefile — `make eval` passes `--eval-only`, which filters `tags.eval_case != ''`.
@@ -1209,7 +1210,7 @@ pip install -e ".[dev]"     # installable package + pytest/ruff
 pytest -q                   # 129 tests, no Postgres, no Ollama, ~5 s
 
 # ---- the stack --------------------------------------------------------------
-docker compose up -d        # postgres+pgvector · unitycatalog · mlflow
+docker compose up -d        # postgres+pgvector · unitycatalog · mlflow (host :5001)
 make seed                   # synthetic VRR data; core.physics computes curated
 make build                  # rebuild vrr_curated from vrr_raw alone
 make queue                  # anomaly → action_queue drafts awaiting approval
@@ -1313,9 +1314,10 @@ vrr_agent_open/
 | Abstention ("I don't know") | ✅ floor 0.62, model not called, guarded by an eval case |
 | Providers (Ollama / OpenAI / Anthropic) | 🔶 local verified; **hosted unverified — no API key on the dev machine** |
 | Evaluation harness | ✅ 6 deterministic scorers over 11 cases |
-| The 3 LLM judges | 🔶 **execute but unusable** — trace content is not reaching them |
-| ρ write-back loop | 🔶 `update_response_factor` exists + tested; the outcome job is not wired |
+| The 3 LLM judges | 🔶 `provenance_cited` / `decision_complete` now read `{{ outputs }}`; `grounded_in_documents` still walks `{{ trace }}`. Verdicts not re-measured; deterministic scorers win. |
+| ρ write-back loop | ✅ `make writeback` fills `actual_post_vrr` from the next monthly VRR and EMA-updates ρ into `pattern_memory` |
 | Unity Catalog registration | 🔶 skeleton; column population from `information_schema` is a TODO |
-| Docker compose path | 🔶 verified against a local Postgres 18, not yet the compose stack |
+| GitHub Actions (`make test`) | ✅ `.github/workflows/test.yml` — off-database unit tests on pull requests and pushes to `main` |
+| Docker compose path | 🔶 MLflow host port is `5001:5000` (macOS AirPlay holds 5000); stack not yet verified end-to-end |
 
 Contributions welcome — Apache-2.0.

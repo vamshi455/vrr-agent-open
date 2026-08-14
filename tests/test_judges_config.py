@@ -85,3 +85,27 @@ def test_an_explicit_openai_api_base_wins_for_either(judges, monkeypatch):
     monkeypatch.setenv("VRR_JUDGE_MODEL", HOSTED)
     cj = importlib.reload(cj)
     assert cj.JUDGE_BASE_URL == "https://proxy.example/v1/chat/completions"
+
+
+# ---- prompt mode: {{ outputs }} vs {{ trace }} -------------------------------
+# ``{{ trace }}`` is MLflow agentic/trace-walking mode. provenance_cited and
+# decision_complete only judge the final answer, so they must use ``{{ outputs }}``.
+# grounded_in_documents needs the retriever span and stays on ``{{ trace }}``.
+
+
+def test_provenance_cited_reads_outputs_not_the_trace(judges):
+    cj = judges(LOCAL, "")
+    assert "{{ outputs }}" in cj.PROVENANCE_CITED
+    assert "{{ trace }}" not in cj.PROVENANCE_CITED
+
+
+def test_decision_complete_reads_outputs_not_the_trace(judges):
+    cj = judges(LOCAL, "")
+    assert "{{ outputs }}" in cj.DECISION_COMPLETE
+    assert "{{ trace }}" not in cj.DECISION_COMPLETE
+
+
+def test_grounded_in_documents_still_walks_the_trace(judges):
+    cj = judges(LOCAL, "")
+    assert "{{ trace }}" in cj.GROUNDED_IN_DOCUMENTS
+    assert "{{ outputs }}" not in cj.GROUNDED_IN_DOCUMENTS

@@ -127,9 +127,11 @@ this field's numbers may come from that path.
 
 ## The chat is answerable without an LLM
 
-`agent/chat.py` routes a question to an intent (`explain` · `audit` · `lineage` ·
-`recommend` · `submit` · `knowledge` · `list`), resolves the pattern/date from the text
-or the sidebar selection, and builds the answer from tool output. Then:
+`agent/chat.py` routes a question to an intent (`status` · `help` · `explain` · `audit` ·
+`lineage` · `recommend` · `submit` · `knowledge` · `list`), resolves the pattern/date from
+the text or the sidebar selection, and builds the answer from tool output. `status` and
+`help` are written/probed, never generated — "which model?" must not fall through to the
+narrator. Then:
 
 * **No local LLM running** → the computed narrative is shown as-is. Nothing is lost but
   the prose.
@@ -202,7 +204,7 @@ order, how long each took, what the LLM was sent, and what the gate decided.
 # 5000 is taken by AirPlay Receiver on macOS — use 5001 (or disable the receiver)
 mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5001
 export MLFLOW_TRACKING_URI=http://localhost:5001
-make app        # or the docker-compose mlflow service on :5000
+make app        # or the docker-compose mlflow service on host :5001 (5001:5000)
 ```
 
 Open <http://localhost:5001> → experiment **vrr-agent-open** → *Traces*. The sidebar in
@@ -244,10 +246,14 @@ curated → agent) for governance; the row-level derivation lives in the contrib
 `core/approval.py` owns the state machine: `draft → analyst → rm → site → executed`,
 plus `rejected` from any live stage. The agent may only write `draft` — every forward
 transition is a human act in the app, role-gated in the sidebar. Executing writes
-`vrr_agent.adjustment_history` (predicted vs actual ΔVRR), which is what the learned
-response factor ρ (`core.recommend.update_response_factor`) reads back.
+`vrr_agent.adjustment_history` (predicted vs actual ΔVRR). After the next monthly
+build, `make writeback` (`pipeline/outcome_writeback.py`) fills `actual_post_vrr` from
+the earliest later `vrr_curated.pattern_vrr` and EMA-updates the response factor (ρ)
+via `core.recommend.update_response_factor` into `pattern_memory`. No later period yet
+is a no-op.
 
 ```bash
-make queue    # anomaly → drafts for every pattern's latest period
-make app      # review, chat, approve
+make queue       # anomaly → drafts for every pattern's latest period
+make app         # review, chat, approve
+make writeback   # after executed changes + the next build: observed VRR → ρ
 ```

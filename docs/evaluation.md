@@ -150,7 +150,11 @@ are facts about the span tree. No LLM, no endpoint, no cost, exact every time:
 **LLM judges** ([`evaluation/custom_judges.py`](../src/vrr_agent_open/evaluation/custom_judges.py))
 are for what needs language judgement — `provenance_cited`, `decision_complete`,
 `grounded_in_documents` — built with `mlflow.genai.make_judge`, boolean-valued so they
-aggregate into a pass rate.
+aggregate into a pass rate. They do **not** all read the same thing: `provenance_cited`
+and `decision_complete` inspect `{{ outputs }}` (the final answer text, MLflow's
+standard non-agentic mode). `grounded_in_documents` still inspects `{{ trace }}` because
+it needs the retriever span. Putting all three on `{{ trace }}` put them in agentic
+trace-walking mode, which neither qwen2.5:7b nor gpt-4o-mini could complete.
 
 The judge model is separate from the agent's narrator (`VRR_JUDGE_MODEL`), and reaches
 Ollama through its OpenAI-compatible endpoint:
@@ -161,8 +165,8 @@ export VRR_JUDGE_MODEL=openai:/qwen2.5:7b        # or a larger local model
 ```
 
 **Judge reliability is the limiting factor.** On a local 7B the judges are useful for
-*relative* movement between runs, not as an absolute bar — in testing one marked a
-correctly-grounded answer as ungrounded, with a rationale that only described its plan.
+*relative* movement between runs, not as an absolute bar. Treat all three as
+UNMEASURED until the next `make traces && make eval` after this template split.
 Where a judge and a deterministic scorer disagree, the deterministic scorer is right.
 `scripts/run_memalign.py` is where judge alignment against human feedback belongs once
 there is feedback to align on.

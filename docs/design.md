@@ -141,6 +141,6 @@ a config change, not a code change.
 ## Status
 Deterministic core, seed + builder, agent (tools · analyst · chat · gate), pgvector RAG,
 and the workbench (4 tabs + a right-docked analyst chat drawer with persistent history) are all implemented and verified against a live Postgres; 59
-tests pass off-DB. Remaining: outcome write-back into ρ, UC column-level registration,
-and a run of the whole path on the docker-compose stack (so far verified on a local
-Postgres 18 + pgvector 0.8.5 cluster).
+tests pass off-DB. Remaining: UC column-level registration, and a run of the whole
+path on the docker-compose stack (so far verified on a local Postgres 18 + pgvector
+0.8.5 cluster). The response factor (ρ) write-back is `make writeback`.

@@ -332,7 +332,7 @@ export interface Health {
           ephemeral_secret: boolean };
   llm: { available: boolean; model: string | null; provider: string };
   tracing: { enabled: boolean; uri: string };
-  postgres: { host: string; monthly_rows: number };
+  postgres: { host: string; monthly_rows: number; n_patterns?: number | null };
   knowledge: { docs: number; chunks: number; pending_review?: number };
   retrieval_min_score: number;
 }
